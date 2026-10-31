@@ -1,0 +1,82 @@
+{
+ "base": -15855338,
+ "surface": -15394526,
+ "card": -14999511,
+ "text": -1380106,
+ "textDim": -5852476,
+ "outline": -13880252,
+ "cyan": -14494738,
+ "lime": -6035915,
+ "amber": -278748,
+ "violet": -5796870,
+ "pink": -757066,
+ "blue": -10443270,
+ "mint": -13315175,
+ "red": -495247,
+ "eden": -13058568,
+ "kenji": -757066,
+ "tool_10": -5019680,
+ "tool_20": -3118627,
+ "tool_30": -5643946,
+ "tool_40": -11116329,
+ "tool_50": -4759587,
+ "tool_60": -4467618,
+ "tool_70": -9597985,
+ "guide_start": -9576548,
+ "guide_library": -10833965,
+ "guide_dead": -2712991,
+ "guide_map": -10494619,
+ "guide_cores": -2041513,
+ "guide_speed": -2663585,
+ "guide_data": -2270379,
+ "guide_trouble": -6497684,
+ "games": [
+  {
+   "title": "Metroid Dread",
+   "id": "010093801237C000",
+   "monogram": "M",
+   "accent": -10559863,
+   "top": -14270920,
+   "ink": -15855338
+  },
+  {
+   "title": "The Legend of Zelda: Tears of the Kingdom",
+   "id": "0100F2C0115B6000",
+   "monogram": "L",
+   "accent": -2132136,
+   "top": -12964303,
+   "ink": -15855338
+  },
+  {
+   "title": "Splatoon 3",
+   "id": "0100C2500FC20000",
+   "monogram": "S",
+   "accent": -1938752,
+   "top": -12899263,
+   "ink": -15855338
+  },
+  {
+   "title": "Xenoblade Chronicles 3",
+   "id": "010074F013262000",
+   "monogram": "X",
+   "accent": -5775783,
+   "top": -13550031,
+   "ink": -15855338
+  },
+  {
+   "title": "Mario Kart 8 Deluxe",
+   "id": "0100152000022000",
+   "monogram": "M",
+   "accent": -2402354,
+   "top": -12965565,
+   "ink": -15855338
+  }
+ ],
+ "format_nsp": -14494738,
+ "format_xci": -6035915,
+ "format_nsz": -278748,
+ "format_dlc": -5796870,
+ "accentOf": {},
+ "section_cores": -757066,
+ "section_start": -10443270
+}

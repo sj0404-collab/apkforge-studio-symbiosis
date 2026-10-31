@@ -99,10 +99,10 @@ index 3a98d4c..fe2a2d5 100644
  
 diff --git a/docs/GUIDE.md b/docs/GUIDE.md
 new file mode 100644
-index 0000000..78db6d9
+index 0000000..28244ae
 --- /dev/null
 +++ b/docs/GUIDE.md
-@@ -0,0 +1,152 @@
+@@ -0,0 +1,185 @@
 +# Symbiosis: инструкция пользования
 +
 +Тот же текст есть в приложении: **Руководство** (кнопка на стартовом экране, а также
@@ -179,6 +179,39 @@ index 0000000..78db6d9
 +**Ключи**, **Инструменты**, **Руководство**.
 +
 +---
++
++## Как выглядит и почему так
++
++Экран тёмный, почти чёрный, с подсветкой сверху. Это не стиль ради стиля: игра в
++эмуляторе — тёмный кадр, и светлая панель вокруг него мешает смотреть.
++
++Цвет в приложении отвечает на вопрос «что это», а не украшает:
++
++| Что | Цвет |
++|---|---|
++| **Игра** | Свой оттенок из её Title ID. Одна и та же игра всегда одного цвета, соседние — разных. Полоса слева и буква в кружке дают узнать игру раньше, чем вы прочитали название |
++| **Формат файла** | `nsp` — голубой, `xci` — лаймовый, `nsz` — янтарный, `DLC` — фиолетовый |
++| **Второе ядро** | Розовый. Везде: карточка Kenji-NX, точка у «своих» настроек, пометка `kenji` на плитке игры |
++| **Eden** | Голубой |
++| **Кнопки** | У каждой свой цвет, и тот же цвет у экрана, куда она ведёт: «Конвертер» янтарный, «Инструменты» розовые, «Руководство» синее |
++
++Ничего не держится на одном цвете: рядом всегда есть слово. Цвет только ускоряет,
++он не заменяет подпись — иначе тем, кто не различает оттенки, пришлось бы угадывать.
++
++Текст поверх цветных плашек выбирается по яркости, а не «белый, потому что красиво»:
++контраст проверяется тестом, минимум 4.2 к 1.
++
++## Что нового в этой сборке
++
++Сборка 41200104556 (`8e613d857ed7b3047cd16d773d1aa96b`, 42.7 МБ,
++https://gofile.io/d/3cIAKSo5) — с новым оформлением и обоими ядрами. Три вещи, которые видно сразу:
++
++1. **Инструменты → «Два ядра»** — первым пунктом. Оба ядра на месте, даже если второе
++   не скачано.
++2. **Долгое нажатие на плитке игры** — «Запустить на Eden», «Запустить на Kenji-NX»,
++   «Свойства игры». Выбор запоминается за игрой; на плитке появляется пометка `kenji`.
++3. **Настройки больше не теряются.** Раньше второй ядро получало числа, вписанные в код
++   (4 ГБ, NCE выключен), — что бы вы ни выбрали на экране. Теперь выбор доезжает до ядра.
 +
 +## 5. Два ядра: гибрид
 +
@@ -826,34 +859,158 @@ index 40e505c..bc9da73 100644
              KenjiBridge.runLoop()
              runOnUiThread { leave() }
          }, "kenji-loop").also { it.start() }
+diff --git a/patch/android/adapters/HomeSettingAdapter.kt b/patch/android/adapters/HomeSettingAdapter.kt
+new file mode 100644
+index 0000000..3b55ab7
+--- /dev/null
++++ b/patch/android/adapters/HomeSettingAdapter.kt
+@@ -0,0 +1,107 @@
++// SPDX-FileCopyrightText: Copyright 2025 Eden Emulator Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++// SPDX-FileCopyrightText: 2023 yuzu Emulator Project
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++package org.yuzu.yuzu_emu.adapters
++
++import android.graphics.drawable.GradientDrawable
++import android.view.LayoutInflater
++import android.view.ViewGroup
++import androidx.appcompat.app.AppCompatActivity
++import androidx.core.content.res.ResourcesCompat
++import androidx.lifecycle.LifecycleOwner
++import org.yuzu.yuzu_emu.databinding.CardHomeOptionBinding
++import org.yuzu.yuzu_emu.fragments.MessageDialogFragment
++import org.yuzu.yuzu_emu.model.HomeSetting
++import org.yuzu.yuzu_emu.utils.SymbiosisTheme
++import org.yuzu.yuzu_emu.utils.ViewUtils.marquee
++import org.yuzu.yuzu_emu.utils.ViewUtils.setVisible
++import org.yuzu.yuzu_emu.utils.collect
++import org.yuzu.yuzu_emu.viewholder.AbstractViewHolder
++
++class HomeSettingAdapter(
++    private val activity: AppCompatActivity,
++    private val viewLifecycle: LifecycleOwner,
++    options: List<HomeSetting>
++) : AbstractListAdapter<HomeSetting, HomeSettingAdapter.HomeOptionViewHolder>(options) {
++    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): HomeOptionViewHolder {
++        CardHomeOptionBinding.inflate(LayoutInflater.from(parent.context), parent, false)
++            .also { return HomeOptionViewHolder(it) }
++    }
++
++    inner class HomeOptionViewHolder(val binding: CardHomeOptionBinding) :
++        AbstractViewHolder<HomeSetting>(binding) {
++        override fun bind(model: HomeSetting) {
++            binding.optionTitle.text = activity.resources.getString(model.titleId)
++            binding.optionDescription.text = activity.resources.getString(model.descriptionId)
++            binding.optionIcon.setImageDrawable(
++                ResourcesCompat.getDrawable(
++                    activity.resources,
++                    model.iconId,
++                    activity.theme
++                )
++            )
++
++            // Цвет пункта. Ключ — id строки, а не позиция: пункты
++            // переставляются (новые ставятся первыми), и «Инструменты»
++            // меняло бы цвет при каждом релизе, если бы ключом был индекс.
++            //
++            // Цвет здесь не для пестроты: шесть одинаковых серых карточек
++            // заставляют читать каждую. Свой цвет у пункта — это тот же
++            // якорь, что и цветная полоса в библиотеке.
++            val accent = SymbiosisTheme.accent("tool:" + model.titleId)
++            val density = binding.root.resources.displayMetrics.density
++            fun dp(v: Int) = (v * density).toInt()
++
++            binding.optionIcon.imageTintList =
++                android.content.res.ColorStateList.valueOf(accent)
++            binding.optionIcon.setBackgroundDrawable(
++                GradientDrawable().apply {
++                    cornerRadius = dp(14).toFloat()
++                    setColor(SymbiosisTheme.soft(accent, 0.16f))
++                }
++            )
++            binding.optionIcon.setPadding(dp(8), dp(8), dp(8), dp(8))
++            binding.optionIcon.layoutParams = (binding.optionIcon.layoutParams as android.view.ViewGroup.MarginLayoutParams).apply {
++                width = dp(40)
++                height = dp(40)
++                marginStart = dp(16)
++            }
++            binding.optionAccent.setBackgroundColor(accent)
++            binding.root.strokeColor = SymbiosisTheme.soft(accent, 0.30f)
++            binding.optionTitle.setTextColor(SymbiosisTheme.TEXT)
++
++            if (!model.isEnabled.invoke()) {
++                binding.optionTitle.alpha = 0.5f
++                binding.optionDescription.alpha = 0.5f
++                binding.optionIcon.alpha = 0.5f
++            }
++
++            model.details.collect(viewLifecycle) { updateOptionDetails(it) }
++            binding.optionDetail.marquee()
++
++            binding.root.setOnClickListener { onClick(model) }
++        }
++
++        private fun onClick(model: HomeSetting) {
++            if (model.isEnabled.invoke()) {
++                model.onClick.invoke()
++            } else {
++                MessageDialogFragment.newInstance(
++                    activity,
++                    titleId = model.disabledTitleId,
++                    descriptionId = model.disabledMessageId
++                ).show(activity.supportFragmentManager, MessageDialogFragment.TAG)
++            }
++        }
++
++        private fun updateOptionDetails(detailString: String) {
++            if (detailString.isNotEmpty()) {
++                binding.optionDetail.text = detailString
++                binding.optionDetail.setVisible(true)
++            }
++        }
++    }
++}
 diff --git a/patch/android/adapters/LauncherTileAdapter.kt b/patch/android/adapters/LauncherTileAdapter.kt
 new file mode 100644
-index 0000000..35fb6c8
+index 0000000..ef0a6bc
 --- /dev/null
 +++ b/patch/android/adapters/LauncherTileAdapter.kt
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,132 @@
 +// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
 +// SPDX-License-Identifier: GPL-3.0-or-later
 +
 +package org.yuzu.yuzu_emu.adapters
 +
-+import android.util.TypedValue
++import android.graphics.drawable.GradientDrawable
 +import android.view.LayoutInflater
 +import android.view.View
 +import android.view.ViewGroup
 +import android.widget.TextView
 +import androidx.core.view.isVisible
 +import androidx.recyclerview.widget.RecyclerView
++import com.google.android.material.card.MaterialCardView
++import com.google.android.material.chip.Chip
 +import org.yuzu.yuzu_emu.R
 +import org.yuzu.yuzu_emu.utils.NativeLibraryPresenter
++import org.yuzu.yuzu_emu.utils.SymbiosisTheme
 +
 +/**
 + * Список библиотеки: одна плитка на файл.
 + *
 + * Адаптер ничего не решает. Что показать, в каком порядке и что будет по
 + * нажатию - это [NativeLibraryPresenter], который проверяется тестом на
-+ * хосте. Здесь только findViewById и подстановка строк, поэтому «плитка
-+ * исчезла» или «пометка пропала» можно починить, не трогая логику.
++ * хосте. Здесь только findViewById, подстановка строк и цвет.
++ *
++ * О ЦВЕТЕ
++ *   Оттенок берётся из Title ID: одна и та же игра всегда одного цвета, а
++ *   соседние в списке — разных. Это не украшение: в библиотеке на несколько
++ *   сотен файлов цвет полосы и буква слева находятся быстрее, чем текст, а
++ *   сжатый образ и обновление отличаются цветом ещё до прочтения подписи.
++ *
++ *   Все цвета приходят из [SymbiosisTheme], поэтому «плитка стала
++ *   нечитаемой» — это проверка палитры, а не поиск по всему адаптеру.
 + */
 +class LauncherTileAdapter(
 +    private val onClick: (NativeLibraryPresenter.Item) -> Unit,
@@ -878,15 +1035,36 @@ index 0000000..35fb6c8
 +
 +    override fun onBindViewHolder(holder: Holder, position: Int) {
 +        val item = items[position]
++        val ctx = holder.itemView.context
++        val accent = SymbiosisTheme.accent(item.path.ifBlank { item.title })
++        val density = ctx.resources.displayMetrics.density
++        fun dp(v: Int) = (v * density).toInt()
++
 +        holder.title.text = item.title
 +        holder.subtitle.text = item.subtitle
 +        holder.subtitle.isVisible = item.subtitle.isNotBlank()
 +
++        // Буква-монограмма: обложки у файла может не быть вовсе, а пустой
++        // квадрат слева читается как недогруженная картинка.
++        holder.monogram.text = SymbiosisTheme.monogram(item.title)
++        holder.monogram.setTextColor(accent)
++        holder.monogram.background = GradientDrawable().apply {
++            cornerRadius = dp(14).toFloat()
++            setColor(SymbiosisTheme.soft(accent, 0.16f))
++        }
++
++        holder.accent.setBackgroundColor(accent)
++        holder.card.setCardBackgroundColor(SymbiosisTheme.mix(SymbiosisTheme.CARD, accent, 0.10f))
++        holder.card.strokeColor = SymbiosisTheme.soft(accent, 0.30f)
++
++        val formatColor = SymbiosisTheme.formatColor(item.badge)
++        tintChip(holder.badge, formatColor, dp(10))
 +        holder.badge.text = item.badge
 +        holder.badge.isVisible = item.badge.isNotBlank()
 +
 +        // Каким ядром пойдёт игра. У Eden пометки нет: он по умолчанию,
 +        // и вторая метка на каждой плитке была бы шумом.
++        tintChip(holder.core, SymbiosisTheme.PINK, dp(10))
 +        holder.core.text = item.core
 +        holder.core.isVisible = item.core.isNotBlank()
 +
@@ -894,16 +1072,13 @@ index 0000000..35fb6c8
 +        holder.note.isVisible = item.note.isNotBlank()
 +        // Красный только там, где человек ничего не исправит настройками:
 +        // «нет ключей» лечится ключами. Сжатый образ - рабочая ситуация,
-+        // поэтому он вторичного цвета, а не аварийного.
++        // поэтому он в цвете конвертера, а не в аварийном.
 +        holder.note.setTextColor(
-+            themedColor(
-+                holder.note,
-+                if (item.action == NativeLibraryPresenter.Action.KEYS) {
-+                    com.google.android.material.R.attr.colorError
-+                } else {
-+                    com.google.android.material.R.attr.colorTertiary
-+                }
-+            )
++            if (item.action == NativeLibraryPresenter.Action.KEYS) {
++                SymbiosisTheme.RED
++            } else {
++                SymbiosisTheme.AMBER
++            }
 +        )
 +
 +        holder.itemView.setOnClickListener { onClick(item) }
@@ -913,27 +1088,25 @@ index 0000000..35fb6c8
 +        }
 +    }
 +
-+    /**
-+     * Цвет из темы, без хардкода.
-+     *
-+     * Материаловские `colorError` и `colorTertiary` берутся из темы
-+     * приложения: у светлой и тёмной темы они разные, а жёстко прописанный
-+     * красный на тёмном фоне читался бы как ошибка вёрстки.
-+     */
-+    private fun themedColor(view: TextView, attr: Int): Int {
-+        val value = TypedValue()
-+        return if (view.context.theme.resolveAttribute(attr, value, true)) {
-+            value.data
-+        } else {
-+            view.currentTextColor
-+        }
++    /** Чип в цвете своей метки: подложка прозрачная, текст яркий. */
++    private fun tintChip(chip: Chip, color: Int, radius: Int) {
++        chip.setTextColor(color)
++        chip.chipBackgroundColor = android.content.res.ColorStateList.valueOf(
++            SymbiosisTheme.soft(color, 0.16f)
++        )
++        chip.chipStrokeWidth = 0f
++        chip.chipCornerRadius = radius.toFloat()
++        chip.chipMinHeight = radius * 2.4f
 +    }
 +
 +    class Holder(view: View) : RecyclerView.ViewHolder(view) {
++        val card: MaterialCardView = view.findViewById(R.id.card_launcher_tile)
++        val accent: View = view.findViewById(R.id.view_tile_accent)
++        val monogram: TextView = view.findViewById(R.id.text_tile_monogram)
 +        val title: TextView = view.findViewById(R.id.text_tile_title)
 +        val subtitle: TextView = view.findViewById(R.id.text_tile_subtitle)
-+        val badge: TextView = view.findViewById(R.id.chip_tile_badge)
-+        val core: TextView = view.findViewById(R.id.chip_tile_core)
++        val badge: Chip = view.findViewById(R.id.chip_tile_badge)
++        val core: Chip = view.findViewById(R.id.chip_tile_core)
 +        val note: TextView = view.findViewById(R.id.text_tile_note)
 +    }
 +}
@@ -1454,19 +1627,62 @@ index 9553244..4dc70fc 100644
  loadGames();
  loadStatus();
  applyPlugins();
+diff --git a/patch/android/drawable/bg_sym_screen.xml b/patch/android/drawable/bg_sym_screen.xml
+new file mode 100644
+index 0000000..0049c68
+--- /dev/null
++++ b/patch/android/drawable/bg_sym_screen.xml
+@@ -0,0 +1,23 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++SPDX-License-Identifier: GPL-3.0-or-later
++
++Фон экрана: сверху холодное синее свечение, ниже — база приложения.
++
++Почему не сплошной цвет: сплошной тёмный фон делает все экраны одинаковыми,
++и «где я» приходится вспоминать по заголовку. Свечение сверху — как подсветка
++консоли: экран узнаётся по силуэту, а текст остаётся на почти чёрном.
++Цвета совпадают с SymbiosisTheme.BASE, поэтому подложка не спорит с
++карточками.
++-->
++<shape xmlns:android="http://schemas.android.com/apk/res/android"
++    android:shape="rectangle">
++    <gradient
++        android:angle="270"
++        android:centerColor="#0E1116"
++        android:centerY="0.32"
++        android:endColor="#0E1116"
++        android:startColor="#16223C"
++        android:type="linear" />
++</shape>
 diff --git a/patch/android/fragments/EnginesFragment.kt b/patch/android/fragments/EnginesFragment.kt
-index 9d8c343..2352f38 100644
+index 9d8c343..5f40509 100644
 --- a/patch/android/fragments/EnginesFragment.kt
 +++ b/patch/android/fragments/EnginesFragment.kt
-@@ -10,6 +10,7 @@ import android.view.ViewGroup
- import android.widget.Button
+@@ -3,53 +3,67 @@
+ 
+ package org.yuzu.yuzu_emu.fragments
+ 
++import android.graphics.Typeface
++import android.graphics.drawable.GradientDrawable
+ import android.os.Bundle
++import android.view.Gravity
+ import android.view.LayoutInflater
+ import android.view.View
+ import android.view.ViewGroup
+-import android.widget.Button
  import android.widget.LinearLayout
++import android.widget.ScrollView
  import android.widget.TextView
-+import androidx.core.content.ContextCompat
  import androidx.core.view.ViewCompat
  import androidx.core.view.WindowInsetsCompat
  import androidx.core.view.updatePadding
-@@ -20,36 +21,37 @@ import kotlinx.coroutines.Dispatchers
+ import androidx.fragment.app.Fragment
+ import androidx.lifecycle.lifecycleScope
++import com.google.android.material.button.MaterialButton
+ import com.google.android.material.transition.MaterialSharedAxis
+ import kotlinx.coroutines.Dispatchers
  import kotlinx.coroutines.launch
  import kotlinx.coroutines.withContext
  import org.yuzu.yuzu_emu.utils.EngineDownloader
@@ -1475,6 +1691,7 @@ index 9d8c343..2352f38 100644
 +import org.yuzu.yuzu_emu.utils.EngineStore
  import org.yuzu.yuzu_emu.utils.KenjiProbeService
 -import org.yuzu.yuzu_emu.utils.EnginePreference
++import org.yuzu.yuzu_emu.utils.SymbiosisTheme
  
  /**
 - * Pick which emulator core runs a game.
@@ -1503,16 +1720,23 @@ index 9d8c343..2352f38 100644
   *
 - *     LibKenjinx.so       54.7 MB raw -> 19.6 MB inside an APK
 - *     libyuzu-android.so  34.4 MB raw -> 12.3 MB
-- *
++ * ПОЧЕМУ ЭКРАН СОБРАН КОДОМ
++ *   Строк становится больше, и каждая новая строка в разметке — ещё один
++ *   файл, который надо не забыть скопировать в дерево сборки (в этом проекте
++ *   это уже случалось дважды). Заодно цвет каждой строки считается из
++ *   [SymbiosisTheme], а не дублируется в десяти XML.
+  *
 - *   Both in one APK is about 47 MB, and the budget is 25. Eden ships inside;
 - *   Kenji is fetched once, on demand, and the APK stays under the limit.
 - *
 - * The screen is built in code rather than XML on purpose: it is a short list
 - * of rows, and a layout file would have to be kept in step with the patch
 - * script by hand - which has already been forgotten twice in this project.
-+ * Экран собран кодом, а не XML: строк становится больше, и каждая новая
-+ * строка в разметке — ещё один файл, который надо не забыть скопировать в
-+ * дерево сборки (в этом проекте это уже случалось дважды).
++ * ПОЧЕМУ ЦВЕТА РАЗНЫЕ ПО СМЫСЛУ
++ *   Eden — голубой, Kenji-NX — розовый, и эти два цвета повторяются везде:
++ *   на карточке ядра, в точке у строки настройки, в пометке на плитке игры.
++ *   Человек, который один раз увидел «розовое = второе ядро», дальше читает
++ *   экран без подписей.
   */
  class EnginesFragment : Fragment() {
  
@@ -1522,11 +1746,19 @@ index 9d8c343..2352f38 100644
  
      override fun onCreate(savedInstanceState: Bundle?) {
          super.onCreate(savedInstanceState)
-@@ -64,11 +66,13 @@ class EnginesFragment : Fragment() {
+@@ -64,18 +78,28 @@ class EnginesFragment : Fragment() {
          container: ViewGroup?,
          savedInstanceState: Bundle?
      ): View {
-+        val scroll = android.widget.ScrollView(requireContext())
++        val scroll = ScrollView(requireContext()).apply {
++            isFillViewport = true
++            // Фон экрана: то же свечение, что у библиотеки, но зеленоватое —
++            // так этот экран отличается от списка игр, не теряя общей базы.
++            background = GradientDrawable(
++                GradientDrawable.Orientation.TOP_BOTTOM,
++                intArrayOf(SymbiosisTheme.soft(SymbiosisTheme.MINT, 0.10f), SymbiosisTheme.BASE)
++            )
++        }
          root = LinearLayout(requireContext()).apply {
              orientation = LinearLayout.VERTICAL
              setPadding(dp(16), dp(16), dp(16), dp(32))
@@ -1537,153 +1769,247 @@ index 9d8c343..2352f38 100644
      }
  
      override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-@@ -87,32 +91,89 @@ class EnginesFragment : Fragment() {
+         super.onViewCreated(view, savedInstanceState)
+         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+-            v.updatePadding(top = bars.top + dp(16), bottom = bars.bottom + dp(32))
++            v.updatePadding(top = bars.top + dp(12), bottom = bars.bottom + dp(32))
+             insets
+         }
+         render()
+@@ -83,40 +107,161 @@ class EnginesFragment : Fragment() {
+ 
+     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+ 
++    private fun rounded(color: Int, radius: Int, stroke: Int = 0, strokeColor: Int = 0) =
++        GradientDrawable().apply {
++            cornerRadius = dp(radius).toFloat()
++            setColor(color)
++            if (stroke > 0) setStroke(dp(stroke), strokeColor)
++        }
++
+     private fun render() {
          val ctx = requireContext()
          root.removeAllViews()
  
 -        root.addView(heading("Ядра"))
-+        root.addView(heading("Два ядра в одном"))
++        // ── заголовок ───────────────────────────────────────────────────
          root.addView(
-             note(
+-            note(
 -                "Два плеера. Основное ядро — в этом процессе. " +
 -                    "Второе (~55 МБ, Kenji-NX) скачивается и играет в процессе :kenji: " +
 -                    "если упадёт, лаунчер останется. В APK его нет — иначе сборка раздуется вдвое."
-+                "Eden встроен в приложение, Kenji-NX (~55 МБ) скачивается один раз и играет " +
-+                    "в процессе :kenji: если упадёт, лаунчер останется. Ядро выбирается не на " +
-+                    "всё приложение, а на игру — долгое нажатие на плитке в библиотеке."
-             )
+-            )
++            TextView(ctx).apply {
++                text = "Два ядра"
++                textSize = 28f
++                setTypeface(typeface, Typeface.BOLD)
++                setTextColor(SymbiosisTheme.TEXT)
++            }
++        )
++        root.addView(
++            TextView(ctx).apply {
++                text = "Eden и Kenji-NX в одном приложении"
++                textSize = 14f
++                setTextColor(SymbiosisTheme.MINT)
++                setPadding(0, dp(2), 0, dp(14))
++            }
          )
--
+ 
 -        val current = EnginePreference.selected(ctx)
 +        if (statusLine.isNotEmpty()) {
 +            root.addView(
 +                TextView(ctx).apply {
 +                    text = statusLine
 +                    textSize = 14f
-+                    setTextColor(accent())
-+                    setPadding(0, 0, 0, dp(8))
++                    setTextColor(SymbiosisTheme.MINT)
++                    background = rounded(SymbiosisTheme.soft(SymbiosisTheme.MINT, 0.14f), 12)
++                    setPadding(dp(12), dp(8), dp(12), dp(8))
++                    val lp = LinearLayout.LayoutParams(
++                        LinearLayout.LayoutParams.MATCH_PARENT,
++                        LinearLayout.LayoutParams.WRAP_CONTENT
++                    )
++                    lp.bottomMargin = dp(12)
++                    layoutParams = lp
 +                }
 +            )
 +        }
  
++        // ── сами ядра ───────────────────────────────────────────────────
          for (engine in EngineLoader.Engine.values()) {
 -            root.addView(engineRow(engine, engine == current))
-+            root.addView(engineRow(engine))
++            root.addView(engineCard(engine))
          }
  
          if (!EngineLoader.deviceSupported()) {
              root.addView(
-                 note(
+-                note(
 -                    "Это устройство не 64-битное (arm64), поэтому скачиваемое " +
 -                        "ядро на нём не запустится. Доступен только Eden."
++                banner(
 +                    "Это устройство не 64-битное (arm64), поэтому скачиваемое ядро на нём " +
-+                        "не запустится. Доступен только Eden."
++                        "не запустится. Доступен только Eden.",
++                    SymbiosisTheme.AMBER
                  )
              )
          }
 +
-+        root.addView(heading("Связь настроек"))
++        // ── связь настроек ──────────────────────────────────────────────
++        root.addView(sectionTitle("Связь настроек", SymbiosisTheme.MINT))
 +        root.addView(
-+            note(
-+                "«из Eden» — значение берётся у основного ядра, пока вы не измените его здесь. " +
-+                    "«своё» — принадлежит второму ядру, Eden его не перетирает. Нажмите строку, " +
-+                    "чтобы переключить."
-+            )
++            TextView(ctx).apply {
++                text = "Зелёная точка — значение взято у Eden. Розовая — своё у Kenji. " +
++                    "Нажмите строку, чтобы переключить значение."
++                textSize = 13f
++                setTextColor(SymbiosisTheme.TEXT_DIM)
++                setPadding(0, 0, 0, dp(10))
++            }
 +        )
-+        EngineStore.rows(ctx).forEach { row -> root.addView(settingRow(row)) }
-+        root.addView(
-+            note(
-+                "Второе ядро сейчас: " + EngineStore.summary(ctx)
++
++        val settingsCard = LinearLayout(ctx).apply {
++            orientation = LinearLayout.VERTICAL
++            background = rounded(SymbiosisTheme.SURFACE, 20, 1, SymbiosisTheme.OUTLINE)
++            setPadding(dp(4), dp(4), dp(4), dp(4))
++            val lp = LinearLayout.LayoutParams(
++                LinearLayout.LayoutParams.MATCH_PARENT,
++                LinearLayout.LayoutParams.WRAP_CONTENT
 +            )
-+        )
++            lp.bottomMargin = dp(10)
++            layoutParams = lp
++        }
++        EngineStore.rows(ctx).forEachIndexed { index, row ->
++            settingsCard.addView(settingRow(row, index))
++        }
++        root.addView(settingsCard)
++
++        // ── итог ────────────────────────────────────────────────────────
++        root.addView(banner("Второе ядро сейчас: " + EngineStore.summary(ctx), SymbiosisTheme.PINK))
 +        root.addView(
-+            button("Вернуть значения Eden") {
++            outlineButton("Вернуть значения Eden", SymbiosisTheme.AMBER) {
 +                statusLine = EngineStore.resetFields(ctx)
 +                render()
 +            }
 +        )
 +
-+        root.addView(heading("Ядро по умолчанию"))
++        // ── ядро по умолчанию ───────────────────────────────────────────
++        root.addView(sectionTitle("Ядро по умолчанию", SymbiosisTheme.CYAN))
 +        root.addView(
-+            note(
-+                "С ним запускаются игры, у которых не выбран свой ядро. Сейчас: " +
++            TextView(ctx).apply {
++                text = "С ним запускаются игры, у которых не выбран свой ядро. Сейчас: " +
 +                    EngineStore.globalCore(ctx).label + "."
-+            )
++                textSize = 13f
++                setTextColor(SymbiosisTheme.TEXT_DIM)
++                setPadding(0, 0, 0, dp(10))
++            }
 +        )
 +        val cores = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-+        cores.addView(button("Eden") {
-+            EngineStore.setGlobalCore(ctx, EngineHybrid.Core.EDEN)
-+            statusLine = "по умолчанию: Eden"
-+            render()
-+        })
-+        cores.addView(button("Kenji-NX") {
-+            val state = EngineLoader.state(ctx, EngineLoader.Engine.KENJI)
-+            val usable = state is EngineLoader.State.Ready || state is EngineLoader.State.Builtin
-+            if (!usable) {
-+                statusLine = "сначала скачайте второе ядро — без него игры пойдут на Eden"
++        cores.addView(
++            choiceCard(
++                "Eden",
++                "встроен",
++                SymbiosisTheme.sectionAccent("eden"),
++                EngineStore.globalCore(ctx) == EngineHybrid.Core.EDEN
++            ) {
++                EngineStore.setGlobalCore(ctx, EngineHybrid.Core.EDEN)
++                statusLine = "по умолчанию: Eden"
 +                render()
-+                return@button
 +            }
-+            EngineStore.setGlobalCore(ctx, EngineHybrid.Core.KENJI)
-+            statusLine = "по умолчанию: Kenji-NX"
-+            render()
-+        })
++        )
++        cores.addView(
++            choiceCard(
++                "Kenji-NX",
++                if (kenjiUsable(ctx)) "скачан" else "не скачан",
++                SymbiosisTheme.PINK,
++                EngineStore.globalCore(ctx) == EngineHybrid.Core.KENJI
++            ) {
++                if (!kenjiUsable(ctx)) {
++                    statusLine = "сначала скачайте второе ядро — без него игры пойдут на Eden"
++                    render()
++                    return@choiceCard
++                }
++                EngineStore.setGlobalCore(ctx, EngineHybrid.Core.KENJI)
++                statusLine = "по умолчанию: Kenji-NX"
++                render()
++            }
++        )
 +        root.addView(cores)
      }
  
 -    private fun engineRow(engine: EngineLoader.Engine, selected: Boolean): View {
-+    /** Ядро: состояние и действия. Оба видны всегда — это и есть «в одном». */
-+    private fun engineRow(engine: EngineLoader.Engine): View {
++    /** Ядро: состояние, цвет и действия. Оба видны всегда — это и есть «в одном». */
++    private fun engineCard(engine: EngineLoader.Engine): View {
          val ctx = requireContext()
++        val isEden = engine == EngineLoader.Engine.EDEN
++        val accent = SymbiosisTheme.sectionAccent(if (isEden) "eden" else "kenji")
++        val state = EngineLoader.state(ctx, engine)
++        val isDefault = EngineStore.globalCore(ctx) == EngineHybrid.Core.of(engine.id)
++
          val box = LinearLayout(ctx).apply {
-             orientation = LinearLayout.VERTICAL
-@@ -123,20 +184,24 @@ class EnginesFragment : Fragment() {
-             )
-             lp.bottomMargin = dp(12)
+-            orientation = LinearLayout.VERTICAL
+-            setPadding(dp(14), dp(14), dp(14), dp(14))
++            orientation = LinearLayout.HORIZONTAL
++            background = rounded(SymbiosisTheme.mix(SymbiosisTheme.CARD, accent, 0.12f), 22, 1,
++                SymbiosisTheme.soft(accent, 0.35f))
+             val lp = LinearLayout.LayoutParams(
+                 LinearLayout.LayoutParams.MATCH_PARENT,
+                 LinearLayout.LayoutParams.WRAP_CONTENT
+@@ -125,92 +270,235 @@ class EnginesFragment : Fragment() {
              layoutParams = lp
-+            background = cardBackground()
          }
  
-+        val isDefault = EngineStore.globalCore(ctx) == EngineHybrid.Core.of(engine.id)
-         val state = EngineLoader.state(ctx, engine)
+-        val state = EngineLoader.state(ctx, engine)
 -        val title = TextView(ctx).apply {
 -            text = if (selected) "${engine.label}  ✓ выбран" else engine.label
 -            textSize = 17f
 -        }
 -        box.addView(title)
-+
+-
+-        val describe = when (state) {
+-            is EngineLoader.State.Builtin ->
+-                "встроен в приложение · всегда доступен"
+-            is EngineLoader.State.Ready ->
+-                "скачан · ${state.bytes / 1048576} МБ в памяти устройства"
+-            is EngineLoader.State.Missing ->
+-                "не скачан · потребуется ${state.bytes / 1048576} МБ загрузки"
+-            is EngineLoader.State.Broken ->
+-                "не готов: ${state.reason}"
+-        }
+-        box.addView(note(describe))
++        // Цветная полоса слева — тот же приём, что у плитки игры.
 +        box.addView(
-+            TextView(ctx).apply {
-+                text = if (isDefault) "${engine.label}  ✓ по умолчанию" else engine.label
-+                textSize = 17f
++            View(ctx).apply {
++                setBackgroundColor(accent)
++                // У LayoutParams нет marginVertical (это свойство появилось
++                // позже и не во всех версиях): верх и низ ставим отдельно.
++                layoutParams = LinearLayout.LayoutParams(dp(4), LinearLayout.LayoutParams.MATCH_PARENT)
++                    .apply {
++                        topMargin = dp(12)
++                        bottomMargin = dp(12)
++                    }
 +            }
 +        )
  
-         val describe = when (state) {
-             is EngineLoader.State.Builtin ->
--                "встроен в приложение · всегда доступен"
-+                "встроен в приложение · всегда доступен · свой конфиг Eden"
-             is EngineLoader.State.Ready ->
--                "скачан · ${state.bytes / 1048576} МБ в памяти устройства"
-+                "скачан · ${state.bytes / 1048576} МБ на устройстве · свой конфиг Kenji"
-             is EngineLoader.State.Missing ->
-                 "не скачан · потребуется ${state.bytes / 1048576} МБ загрузки"
-             is EngineLoader.State.Broken ->
-@@ -145,58 +210,24 @@ class EnginesFragment : Fragment() {
-         box.addView(note(describe))
+-        val buttons = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
++        val body = LinearLayout(ctx).apply {
++            orientation = LinearLayout.VERTICAL
++            setPadding(dp(14), dp(14), dp(14), dp(14))
++        }
++        box.addView(body)
  
-         val buttons = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
--
 -        // Selecting is only offered when the engine can actually start. A
 -        // button that sets a preference and then fails at launch is worse than
 -        // no button.
-         val usable = state is EngineLoader.State.Builtin || state is EngineLoader.State.Ready
+-        val usable = state is EngineLoader.State.Builtin || state is EngineLoader.State.Ready
 -        if (usable && !selected) {
 -            buttons.addView(button("Выбрать") {
 -                EnginePreference.select(ctx, engine)
 -                render()
 -            })
--        }
++        // Строка: буква, название, статус справа.
++        val head = LinearLayout(ctx).apply {
++            orientation = LinearLayout.HORIZONTAL
++            gravity = Gravity.CENTER_VERTICAL
+         }
 -        if (usable) {
 -            buttons.addView(button("Запустить") {
 -                EnginePreference.select(ctx, engine)
@@ -1703,17 +2029,77 @@ index 9d8c343..2352f38 100644
 -                        android.widget.Toast.LENGTH_LONG
 -                    ).show()
 -                    requireActivity().onBackPressedDispatcher.onBackPressed()
--                }
++        head.addView(
++            TextView(ctx).apply {
++                text = if (isEden) "E" else "K"
++                textSize = 20f
++                setTypeface(typeface, Typeface.BOLD)
++                setTextColor(accent)
++                gravity = Gravity.CENTER
++                background = rounded(SymbiosisTheme.soft(accent, 0.16f), 14)
++                layoutParams = LinearLayout.LayoutParams(dp(44), dp(44))
++            }
++        )
++        head.addView(
++            LinearLayout(ctx).apply {
++                orientation = LinearLayout.VERTICAL
++                setPadding(dp(12), 0, dp(8), 0)
++                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
++                addView(
++                    TextView(ctx).apply {
++                        text = engine.label
++                        textSize = 18f
++                        setTypeface(typeface, Typeface.BOLD)
++                        setTextColor(SymbiosisTheme.TEXT)
++                    }
++                )
++                addView(
++                    TextView(ctx).apply {
++                        text = if (isEden) "встроен в приложение" else "отдельный процесс :kenji"
++                        textSize = 12f
++                        setTextColor(SymbiosisTheme.TEXT_DIM)
++                    }
++                )
++            }
++        )
++        head.addView(statusPill(state))
++        body.addView(head)
++
++        if (isDefault) {
++            body.addView(
++                TextView(ctx).apply {
++                    text = "✓ по умолчанию"
++                    textSize = 12f
++                    setTextColor(accent)
++                    setPadding(0, dp(8), 0, 0)
+                 }
 -            })
--        }
++            )
++        }
++
++        body.addView(
++            TextView(ctx).apply {
++                text = describe(state)
++                textSize = 13f
++                setTextColor(SymbiosisTheme.TEXT_DIM)
++                setPadding(0, dp(8), 0, 0)
++            }
++        )
++
++        val buttons = LinearLayout(ctx).apply {
++            orientation = LinearLayout.HORIZONTAL
++            setPadding(0, dp(10), 0, 0)
+         }
++        val usable = state is EngineLoader.State.Builtin || state is EngineLoader.State.Ready
  
 +        if (usable && engine == EngineLoader.Engine.KENJI) {
-+            buttons.addView(button("Проверить") { probe(engine) })
++            buttons.addView(filledButton("Проверить", accent) { probe(engine) })
 +        }
          if (state is EngineLoader.State.Missing || state is EngineLoader.State.Broken) {
              if (EngineLoader.deviceSupported()) {
                  val mb = (EngineLoader.KNOWN_SIZE[engine] ?: 0L) / 1048576
-                 buttons.addView(button("Скачать ($mb МБ)") { fetch(engine) })
+-                buttons.addView(button("Скачать ($mb МБ)") { fetch(engine) })
++                buttons.addView(filledButton("Скачать ($mb МБ)", accent) { fetch(engine) })
              }
          }
 -
@@ -1725,8 +2111,9 @@ index 9d8c343..2352f38 100644
 -        }
 -
          if (state is EngineLoader.State.Ready) {
-             buttons.addView(button("Удалить") {
+-            buttons.addView(button("Удалить") {
 -                if (selected) EnginePreference.select(ctx, EngineLoader.Engine.EDEN)
++            buttons.addView(outlineButton("Удалить", SymbiosisTheme.RED) {
 +                if (EngineStore.globalCore(ctx) == EngineHybrid.Core.KENJI) {
 +                    EngineStore.setGlobalCore(ctx, EngineHybrid.Core.EDEN)
 +                }
@@ -1735,129 +2122,300 @@ index 9d8c343..2352f38 100644
                  render()
              })
          }
-@@ -205,6 +236,68 @@ class EnginesFragment : Fragment() {
+-
+-        if (buttons.childCount > 0) box.addView(buttons)
++        if (buttons.childCount > 0) body.addView(buttons)
          return box
      }
  
-+    /** Строка настройки: нажатие переключает значение. */
-+    private fun settingRow(row: EngineHybrid.Row): View {
++    /** Состояние словами. Не числами и не именами исключений. */
++    private fun describe(state: EngineLoader.State): String = when (state) {
++        is EngineLoader.State.Builtin -> "Всегда доступен, ничего скачивать не нужно."
++        is EngineLoader.State.Ready -> "Скачан, ${state.bytes / 1048576} МБ на устройстве."
++        is EngineLoader.State.Missing ->
++            "Не скачан. Нужно ${state.bytes / 1048576} МБ один раз: игры, сейвы и ключи общие."
++        is EngineLoader.State.Broken -> "Не готов: ${state.reason}"
++    }
++
++    private fun statusPill(state: EngineLoader.State): View {
++        val ctx = requireContext()
++        val (label, color) = when (state) {
++            is EngineLoader.State.Builtin -> "встроен" to SymbiosisTheme.MINT
++            is EngineLoader.State.Ready -> "готов" to SymbiosisTheme.MINT
++            is EngineLoader.State.Missing -> "не скачан" to SymbiosisTheme.AMBER
++            is EngineLoader.State.Broken -> "непригоден" to SymbiosisTheme.RED
++        }
++        return TextView(ctx).apply {
++            text = label
++            textSize = 11f
++            setTypeface(typeface, Typeface.BOLD)
++            setTextColor(color)
++            background = rounded(SymbiosisTheme.soft(color, 0.16f), 10)
++            setPadding(dp(10), dp(5), dp(10), dp(5))
++        }
++    }
++
++    /** Строка настройки: точка источника, подпись, значение. Вся строка нажимается. */
++    private fun settingRow(row: EngineHybrid.Row, index: Int): View {
 +        val ctx = requireContext()
 +        val field = EngineHybrid.FIELDS.firstOrNull { it.id == row.id }
++        val fromEden = row.source == EngineHybrid.Source.EDEN
++        val dot = if (fromEden) SymbiosisTheme.MINT else SymbiosisTheme.PINK
++
 +        val line = LinearLayout(ctx).apply {
-+            orientation = LinearLayout.HORIZONTAL
-+            setPadding(0, dp(10), 0, dp(10))
++            orientation = LinearLayout.VERTICAL
 +            isClickable = true
 +            isFocusable = true
++            background = rounded(SymbiosisTheme.SURFACE, 12)
++            setPadding(dp(12), dp(10), dp(12), dp(10))
 +            setOnClickListener {
 +                statusLine = EngineStore.cycleField(ctx, row.id)
 +                render()
 +            }
 +        }
-+        line.addView(
-+            LinearLayout(ctx).apply {
-+                orientation = LinearLayout.VERTICAL
-+                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-+                layoutParams = lp
-+                addView(
-+                    TextView(ctx).apply {
-+                        text = row.label
-+                        textSize = 15f
-+                    }
-+                )
-+                if (field != null && field.hint.isNotEmpty()) {
-+                    addView(note(field.hint))
-+                }
++
++        val top = LinearLayout(ctx).apply {
++            orientation = LinearLayout.HORIZONTAL
++            gravity = Gravity.CENTER_VERTICAL
++        }
++        top.addView(
++            View(ctx).apply {
++                background = rounded(dot, 4)
++                layoutParams = LinearLayout.LayoutParams(dp(8), dp(8)).apply { marginEnd = dp(10) }
 +            }
 +        )
-+        line.addView(
++        top.addView(
++            TextView(ctx).apply {
++                text = row.label
++                textSize = 15f
++                setTextColor(SymbiosisTheme.TEXT)
++                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
++            }
++        )
++        top.addView(
 +            TextView(ctx).apply {
 +                text = row.value
 +                textSize = 15f
-+                setTextColor(accent())
-+                val lp = LinearLayout.LayoutParams(
-+                    LinearLayout.LayoutParams.WRAP_CONTENT,
-+                    LinearLayout.LayoutParams.WRAP_CONTENT
-+                )
-+                lp.marginStart = dp(8)
-+                layoutParams = lp
++                setTypeface(typeface, Typeface.BOLD)
++                setTextColor(if (fromEden) SymbiosisTheme.MINT else SymbiosisTheme.PINK)
++                setPadding(dp(8), 0, 0, 0)
++                // Значение вроде «выкл · Dynarmic» не должно выдавливать
++                // подпись за край на узком экране: уступает половину строки.
++                maxWidth = (resources.displayMetrics.widthPixels * 0.46f).toInt()
++                maxLines = 2
 +            }
 +        )
++        line.addView(top)
++
 +        line.addView(
 +            TextView(ctx).apply {
-+                text = when (row.source) {
-+                    EngineHybrid.Source.EDEN -> "из Eden"
-+                    EngineHybrid.Source.OWN -> "своё"
-+                }
-+                textSize = 12f
-+                alpha = 0.7f
-+                val lp = LinearLayout.LayoutParams(
-+                    LinearLayout.LayoutParams.WRAP_CONTENT,
-+                    LinearLayout.LayoutParams.WRAP_CONTENT
-+                )
-+                lp.marginStart = dp(8)
-+                layoutParams = lp
++                text = if (fromEden) "из Eden · общий с Eden" else "своё у Kenji · Eden не трогает"
++                textSize = 11f
++                setTextColor(if (fromEden) SymbiosisTheme.soft(SymbiosisTheme.MINT, 0.85f)
++                else SymbiosisTheme.soft(SymbiosisTheme.PINK, 0.85f))
++                setPadding(dp(18), dp(3), 0, 0)
 +            }
 +        )
++        // Пояснение — отдельной строкой и приглушённо: оно нужно один раз,
++        // а прижать его к пометке источника значило бы спорить с цветом.
++        if (field != null && field.hint.isNotEmpty()) {
++            line.addView(
++                TextView(ctx).apply {
++                    text = field.hint
++                    textSize = 11f
++                    setTextColor(SymbiosisTheme.TEXT_DIM)
++                    setPadding(dp(18), dp(2), 0, dp(2))
++                }
++            )
++        }
++
++        val lp = LinearLayout.LayoutParams(
++            LinearLayout.LayoutParams.MATCH_PARENT,
++            LinearLayout.LayoutParams.WRAP_CONTENT
++        )
++        if (index > 0) lp.topMargin = dp(2)
++        line.layoutParams = lp
 +        return line
 +    }
++
++    // ── действия ───────────────────────────────────────────────────────
 +
      private fun fetch(engine: EngineLoader.Engine) {
          if (busy) return
          busy = true
-@@ -240,6 +333,7 @@ class EnginesFragment : Fragment() {
+ 
+         val ctx = requireContext()
+-        val status = note("Скачиваю…")
++        val accent = SymbiosisTheme.sectionAccent(if (engine == EngineLoader.Engine.EDEN) "eden" else "kenji")
++        val status = banner("Скачиваю…", accent)
+         root.addView(status)
+ 
+         viewLifecycleOwner.lifecycleScope.launch {
+@@ -231,6 +519,8 @@ class EnginesFragment : Fragment() {
+             busy = false
+             if (!result.ok) {
+                 status.text = result.message
++                status.setTextColor(SymbiosisTheme.RED)
++                status.background = rounded(SymbiosisTheme.soft(SymbiosisTheme.RED, 0.14f), 12)
+             } else {
+                 // Load it straight away rather than at the next launch: if the
+                 // core is going to be refused, the person who just waited for
+@@ -238,8 +528,10 @@ class EnginesFragment : Fragment() {
+                 val err = withContext(Dispatchers.IO) { EngineLoader.load(ctx, engine) }
+                 if (err != null) {
                      status.text = "Скачано, но не загрузилось: $err"
++                    status.setTextColor(SymbiosisTheme.AMBER)
                      return@launch
                  }
 +                statusLine = "второе ядро скачано · настройки у него свои"
                  render()
              }
          }
-@@ -265,17 +359,43 @@ class EnginesFragment : Fragment() {
+@@ -256,36 +548,131 @@ class EnginesFragment : Fragment() {
+     private fun probe(engine: EngineLoader.Engine) {
+         if (busy) return
+         busy = true
+-        val status = note("Проверяю ядро в отдельном процессе…")
++        val accent = SymbiosisTheme.sectionAccent("kenji")
++        val status = banner("Проверяю ядро в отдельном процессе…", accent)
+         root.addView(status)
+ 
+         KenjiProbeService.probe(requireContext()) { ok, message ->
+             busy = false
+             status.text = if (ok) "Ядро запускается: $message" else "Не запустилось: $message"
++            status.setTextColor(if (ok) SymbiosisTheme.MINT else SymbiosisTheme.RED)
++            status.background = rounded(
++                SymbiosisTheme.soft(if (ok) SymbiosisTheme.MINT else SymbiosisTheme.RED, 0.14f), 12
++            )
          }
      }
  
-+    private fun accent(): Int = resolveAttr(com.google.android.material.R.attr.colorPrimary)
-+
-+    private fun cardBackground(): android.graphics.drawable.Drawable? {
-+        val view = TextView(requireContext())
-+        val value = android.util.TypedValue()
-+        val theme = view.context.theme
-+        val ok = theme.resolveAttribute(com.google.android.material.R.attr.colorSurfaceVariant, value, true)
-+        return if (ok) {
-+            android.graphics.drawable.GradientDrawable().apply {
-+                cornerRadius = dp(16).toFloat()
-+                setColor(value.data)
-+            }
-+        } else {
-+            null
-+        }
-+    }
-+
-+    private fun resolveAttr(attr: Int): Int {
-+        val value = android.util.TypedValue()
-+        return if (requireContext().theme.resolveAttribute(attr, value, true)) {
-+            value.data
-+        } else {
-+            ContextCompat.getColor(requireContext(), android.R.color.primary_text_dark)
-+        }
-+    }
-+
-     private fun heading(text: String) = TextView(requireContext()).apply {
-         this.text = text
-         textSize = 20f
+-    private fun heading(text: String) = TextView(requireContext()).apply {
+-        this.text = text
+-        textSize = 20f
 -        setPadding(0, 0, 0, dp(8))
-+        setPadding(0, dp(12), 0, dp(8))
++    private fun kenjiUsable(ctx: android.content.Context): Boolean {
++        val state = EngineLoader.state(ctx, EngineLoader.Engine.KENJI)
++        return state is EngineLoader.State.Ready || state is EngineLoader.State.Builtin
      }
  
-     private fun note(text: String) = TextView(requireContext()).apply {
+-    private fun note(text: String) = TextView(requireContext()).apply {
++    // ── мелкие кирпичи ─────────────────────────────────────────────────
++
++    private fun sectionTitle(text: String, accent: Int) = TextView(requireContext()).apply {
          this.text = text
-         textSize = 14f
-         alpha = 0.75f
+-        textSize = 14f
+-        alpha = 0.75f
 -        setPadding(0, dp(2), 0, dp(8))
-+        setPadding(0, dp(2), 0, dp(6))
++        textSize = 19f
++        setTypeface(typeface, Typeface.BOLD)
++        setTextColor(accent)
++        setPadding(0, dp(14), 0, dp(6))
      }
  
-     private fun button(text: String, onClick: () -> Unit) = Button(requireContext()).apply {
+-    private fun button(text: String, onClick: () -> Unit) = Button(requireContext()).apply {
++    /** Плашка-сообщение: используется и для прогресса, и для итога. */
++    private fun banner(text: String, accent: Int) = TextView(requireContext()).apply {
+         this.text = text
++        textSize = 13f
++        setTextColor(accent)
++        background = rounded(SymbiosisTheme.soft(accent, 0.12f), 12)
++        setPadding(dp(12), dp(10), dp(12), dp(10))
+         val lp = LinearLayout.LayoutParams(
+-            LinearLayout.LayoutParams.WRAP_CONTENT,
++            LinearLayout.LayoutParams.MATCH_PARENT,
+             LinearLayout.LayoutParams.WRAP_CONTENT
+         )
+-        lp.rightMargin = dp(8)
++        lp.bottomMargin = dp(10)
+         layoutParams = lp
+-        setOnClickListener { onClick() }
++    }
++
++    private fun filledButton(text: String, accent: Int, onClick: () -> Unit) =
++        MaterialButton(requireContext()).apply {
++            this.text = text
++            textSize = 14f
++            isAllCaps = false
++            setTextColor(SymbiosisTheme.inkOn(accent))
++            backgroundTintList = android.content.res.ColorStateList.valueOf(accent)
++            cornerRadius = dp(14)
++            insetTop = 0
++            insetBottom = 0
++            minHeight = dp(44)
++            layoutParams = LinearLayout.LayoutParams(
++                LinearLayout.LayoutParams.WRAP_CONTENT,
++                LinearLayout.LayoutParams.WRAP_CONTENT
++            ).apply { marginEnd = dp(8) }
++            setOnClickListener { onClick() }
++        }
++
++    private fun outlineButton(text: String, accent: Int, onClick: () -> Unit) =
++        MaterialButton(requireContext()).apply {
++            this.text = text
++            textSize = 14f
++            isAllCaps = false
++            setTextColor(accent)
++            backgroundTintList = android.content.res.ColorStateList.valueOf(
++                SymbiosisTheme.soft(accent, 0.12f)
++            )
++            strokeWidth = 0
++            cornerRadius = dp(14)
++            insetTop = 0
++            insetBottom = 0
++            minHeight = dp(44)
++            val lp = LinearLayout.LayoutParams(
++                LinearLayout.LayoutParams.MATCH_PARENT,
++                LinearLayout.LayoutParams.WRAP_CONTENT
++            )
++            lp.bottomMargin = dp(8)
++            layoutParams = lp
++            setOnClickListener { onClick() }
++        }
++
++    /** Крупная карточка выбора: два ядра рядом, выбранное подсвечено. */
++    private fun choiceCard(
++        title: String,
++        subtitle: String,
++        accent: Int,
++        selected: Boolean,
++        onClick: () -> Unit
++    ): View {
++        val ctx = requireContext()
++        val box = LinearLayout(ctx).apply {
++            orientation = LinearLayout.VERTICAL
++            gravity = Gravity.CENTER
++            background = rounded(
++                if (selected) SymbiosisTheme.soft(accent, 0.16f) else SymbiosisTheme.SURFACE,
++                18,
++                if (selected) 2 else 1,
++                if (selected) accent else SymbiosisTheme.OUTLINE
++            )
++            setPadding(dp(12), dp(14), dp(12), dp(14))
++            isClickable = true
++            isFocusable = true
++            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
++                .apply { marginEnd = dp(8) }
++            setOnClickListener { onClick() }
++        }
++        box.addView(
++            TextView(ctx).apply {
++                text = if (selected) "● $title" else "○ $title"
++                textSize = 15f
++                setTypeface(typeface, Typeface.BOLD)
++                setTextColor(if (selected) accent else SymbiosisTheme.TEXT)
++            }
++        )
++        box.addView(
++            TextView(ctx).apply {
++                text = subtitle
++                textSize = 11f
++                setTextColor(SymbiosisTheme.TEXT_DIM)
++            }
++        )
++        return box
+     }
+ }
 diff --git a/patch/android/fragments/GamePropertiesFragment.kt b/patch/android/fragments/GamePropertiesFragment.kt
 index 981661e..3f5048e 100644
 --- a/patch/android/fragments/GamePropertiesFragment.kt
@@ -1937,10 +2495,10 @@ index 993d3fc..dcafa7f 100644
                      }.onFailure {
 diff --git a/patch/android/fragments/ManualFragment.kt b/patch/android/fragments/ManualFragment.kt
 new file mode 100644
-index 0000000..5df4ccc
+index 0000000..330461f
 --- /dev/null
 +++ b/patch/android/fragments/ManualFragment.kt
-@@ -0,0 +1,191 @@
+@@ -0,0 +1,223 @@
 +// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
 +// SPDX-License-Identifier: GPL-3.0-or-later
 +
@@ -1967,6 +2525,7 @@ index 0000000..5df4ccc
 +import org.yuzu.yuzu_emu.databinding.FragmentManualBinding
 +import org.yuzu.yuzu_emu.utils.ConverterPicker
 +import org.yuzu.yuzu_emu.utils.Manual
++import org.yuzu.yuzu_emu.utils.SymbiosisTheme
 +
 +/**
 + * Инструкция пользования.
@@ -2037,6 +2596,10 @@ index 0000000..5df4ccc
 +            // «ничего не нашлось» и «руководство не загрузилось» - разные
 +            // вещи, и человеку важно понимать, какая из них случилась.
 +            val row = layoutInflater.inflate(R.layout.item_manual_step, container, false)
++            row.findViewById<TextView>(R.id.text_manual_step_number).apply {
++                text = "?"
++                setTextColor(SymbiosisTheme.TEXT_DIM)
++            }
 +            row.findViewById<TextView>(R.id.text_manual_step_title)
 +                .setText(R.string.manual_search_empty_title)
 +            row.findViewById<TextView>(R.id.text_manual_step_text)
@@ -2045,14 +2608,36 @@ index 0000000..5df4ccc
 +            return
 +        }
 +
++        val density = resources.displayMetrics.density
++        fun dp(v: Int) = (v * density).toInt()
++
 +        sections.forEach { section ->
 +            val card = layoutInflater.inflate(R.layout.card_manual_section, container, false)
-+            card.findViewById<TextView>(R.id.text_manual_section_title).text = section.title
++
++            // Цвет раздела: ключ — id раздела, а не позиция. Разделы
++            // переставляются при правках текста, и цвет «Двух ядер» не должен
++            // уезжать на другое место от того, что выше вставили абзац.
++            val accent = SymbiosisTheme.guideAccent(section.id)
++            card.findViewById<TextView>(R.id.text_manual_section_title).apply {
++                text = section.title
++                setTextColor(accent)
++            }
 +            card.findViewById<TextView>(R.id.text_manual_section_intro).text = section.intro
++            card.findViewById<View>(R.id.view_manual_accent).setBackgroundColor(accent)
++            (card as com.google.android.material.card.MaterialCardView).strokeColor =
++                SymbiosisTheme.soft(accent, 0.30f)
 +
 +            val stepsContainer = card.findViewById<LinearLayout>(R.id.container_manual_steps)
-+            section.steps.forEach { step ->
++            section.steps.forEachIndexed { index, step ->
 +                val row = layoutInflater.inflate(R.layout.item_manual_step, stepsContainer, false)
++                row.findViewById<TextView>(R.id.text_manual_step_number).apply {
++                    text = (index + 1).toString()
++                    setTextColor(accent)
++                    background = android.graphics.drawable.GradientDrawable().apply {
++                        cornerRadius = dp(13).toFloat()
++                        setColor(SymbiosisTheme.soft(accent, 0.16f))
++                    }
++                }
 +                row.findViewById<TextView>(R.id.text_manual_step_title).text = step.title
 +                row.findViewById<TextView>(R.id.text_manual_step_text).text = step.text
 +                stepsContainer.addView(row)
@@ -2064,6 +2649,11 @@ index 0000000..5df4ccc
 +                val button = layoutInflater
 +                    .inflate(R.layout.button_manual_action, actionsContainer, false) as MaterialButton
 +                button.text = action.label
++                // Кнопка в цвете своего раздела: «Открыть два ядра» розовая,
++                // потому что розовое — это второе ядро и на других экранах.
++                button.setTextColor(accent)
++                button.backgroundTintList =
++                    android.content.res.ColorStateList.valueOf(SymbiosisTheme.soft(accent, 0.16f))
 +                button.setOnClickListener { go(action.go) }
 +                val params = LinearLayout.LayoutParams(
 +                    LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -2134,10 +2724,10 @@ index 0000000..5df4ccc
 +}
 diff --git a/patch/android/fragments/NativeLauncherFragment.kt b/patch/android/fragments/NativeLauncherFragment.kt
 new file mode 100644
-index 0000000..1bd8cc3
+index 0000000..4560c00
 --- /dev/null
 +++ b/patch/android/fragments/NativeLauncherFragment.kt
-@@ -0,0 +1,456 @@
+@@ -0,0 +1,523 @@
 +// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
 +// SPDX-License-Identifier: GPL-3.0-or-later
 +
@@ -2174,6 +2764,7 @@ index 0000000..1bd8cc3
 +import org.yuzu.yuzu_emu.utils.EngineStore
 +import org.yuzu.yuzu_emu.utils.GameHelper
 +import org.yuzu.yuzu_emu.utils.NativeLibraryPresenter
++import org.yuzu.yuzu_emu.utils.SymbiosisTheme
 +import org.yuzu.yuzu_emu.utils.collect
 +
 +/**
@@ -2263,6 +2854,7 @@ index 0000000..1bd8cc3
 +            setHasFixedSize(false)
 +        }
 +
++        applyTheme()
 +        buildFilterChips()
 +        bindActions()
 +
@@ -2288,6 +2880,55 @@ index 0000000..1bd8cc3
 +        }
 +
 +        setInsets()
++    }
++
++    /**
++     * Цвет экрана.
++     *
++     * Шесть верхних кнопок делают разные вещи, и раньше все шесть выглядели
++     * одинаково: чтобы найти «Конвертер», приходилось читать каждую. Теперь
++     * у каждой свой цвет, и он же повторяется на её экране — цвет становится
++     * подписью, а не украшением.
++     *
++     * Тона приглушённые (16 % акцента на тёмном), текст — сам акцент: так
++     * кнопка остаётся читаемой на солнце и не превращает строку в радугу.
++     */
++    private fun applyTheme() {
++        val density = resources.displayMetrics.density
++        fun dp(v: Int) = (v * density).toInt()
++
++        fun tint(button: com.google.android.material.button.MaterialButton, accent: Int) {
++            button.backgroundTintList = android.content.res.ColorStateList.valueOf(
++                SymbiosisTheme.soft(accent, 0.16f)
++            )
++            button.setTextColor(accent)
++            button.strokeWidth = 0
++            button.cornerRadius = dp(14)
++        }
++
++        tint(binding.buttonLauncherRescan, SymbiosisTheme.CYAN)
++        tint(binding.buttonLauncherFolders, SymbiosisTheme.LIME)
++        tint(binding.buttonLauncherConvert, SymbiosisTheme.AMBER)
++        tint(binding.buttonLauncherKeys, SymbiosisTheme.VIOLET)
++        tint(binding.buttonLauncherTools, SymbiosisTheme.PINK)
++        tint(binding.buttonLauncherHelp, SymbiosisTheme.BLUE)
++
++        binding.toolbarLauncher.title = getString(R.string.launcher_title)
++
++        binding.layoutLauncherSearch.setBoxStrokeColor(SymbiosisTheme.soft(SymbiosisTheme.CYAN, 0.55f))
++        binding.layoutLauncherSearch.setHintTextColor(
++            android.content.res.ColorStateList.valueOf(SymbiosisTheme.soft(SymbiosisTheme.CYAN, 0.85f))
++        )
++        // Одно поле boxCornerRadius у TextInputLayout нет — есть радиусы по
++        // углам. Все четыре одинаковые: скругление у карточки и у поиска
++        // должно совпадать, иначе экран выглядит собранным из разных наборов.
++        binding.layoutLauncherSearch.setBoxCornerRadii(
++            dp(16).toFloat(), dp(16).toFloat(), dp(16).toFloat(), dp(16).toFloat()
++        )
++        binding.layoutLauncherSearch.setBoxBackgroundColor(SymbiosisTheme.soft(SymbiosisTheme.CYAN, 0.05f))
++
++        binding.textLauncherSummary.setTextColor(SymbiosisTheme.CYAN)
++        binding.textLauncherEmpty.setTextColor(SymbiosisTheme.TEXT_DIM)
 +    }
 +
 +    /**
@@ -2331,6 +2972,22 @@ index 0000000..1bd8cc3
 +                text = getString(label)
 +                isCheckable = true
 +                isChecked = index == 0
++                // Выбранный фильтр — цветом библиотеки: строка «какой фильтр
++                // включён» должна читаться одним взглядом, без прочтения.
++                chipBackgroundColor = android.content.res.ColorStateList(
++                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
++                    intArrayOf(
++                        SymbiosisTheme.soft(SymbiosisTheme.CYAN, 0.22f),
++                        SymbiosisTheme.CARD
++                    )
++                )
++                setTextColor(
++                    android.content.res.ColorStateList(
++                        arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
++                        intArrayOf(SymbiosisTheme.CYAN, SymbiosisTheme.TEXT_DIM)
++                    )
++                )
++                chipStrokeWidth = 0f
 +                setOnClickListener {
 +                    filter = id
 +                    render()
@@ -2676,12 +3333,67 @@ index 0000000..a344c0d
 +    android:minHeight="40dp"
 +    android:insetTop="0dp"
 +    android:insetBottom="0dp" />
+diff --git a/patch/android/layout/card_home_option.xml b/patch/android/layout/card_home_option.xml
+index 4d7d8f6..cf07684 100644
+--- a/patch/android/layout/card_home_option.xml
++++ b/patch/android/layout/card_home_option.xml
+@@ -6,17 +6,31 @@
+     android:id="@+id/option_card"
+     android:layout_width="match_parent"
+     android:layout_height="wrap_content"
+-    android:layout_marginBottom="16dp"
+-    android:layout_marginHorizontal="8dp"
++    android:layout_marginBottom="10dp"
++    android:layout_marginHorizontal="0dp"
+     android:background="@android:color/transparent"
+     android:clickable="true"
+     android:focusable="true"
+-    app:cardCornerRadius="16dp"
++    app:cardCornerRadius="20dp"
+     app:cardBackgroundColor="@android:color/transparent"
+     app:cardElevation="0dp"
+     app:strokeColor="?attr/colorOutline"
+     app:strokeWidth="1dp">
+ 
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:orientation="horizontal">
++
++        <!-- Цвет пункта. Ставится в HomeSettingAdapter из SymbiosisTheme:
++             шесть одинаковых карточек заставляют читать каждую. -->
++        <View
++            android:id="@+id/option_accent"
++            android:layout_width="4dp"
++            android:layout_height="match_parent"
++            android:layout_marginVertical="10dp"
++            android:background="?attr/colorPrimary" />
++
+     <LinearLayout
+         android:id="@+id/option_layout"
+         android:layout_width="match_parent"
+@@ -27,7 +41,7 @@
+             android:id="@+id/option_icon"
+             android:layout_width="24dp"
+             android:layout_height="24dp"
+-            android:layout_marginStart="24dp"
++            android:layout_marginStart="16dp"
+             android:layout_gravity="center_vertical"
+             app:tint="?attr/colorPrimary" />
+ 
+@@ -81,4 +95,6 @@
+ 
+     </LinearLayout>
+ 
++    </LinearLayout>
++
+ </com.google.android.material.card.MaterialCardView>
 diff --git a/patch/android/layout/card_manual_section.xml b/patch/android/layout/card_manual_section.xml
 new file mode 100644
-index 0000000..ff4bdab
+index 0000000..e5a71ff
 --- /dev/null
 +++ b/patch/android/layout/card_manual_section.xml
-@@ -0,0 +1,60 @@
+@@ -0,0 +1,74 @@
 +<?xml version="1.0" encoding="utf-8"?>
 +<!--
 +SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
@@ -2700,7 +3412,19 @@ index 0000000..ff4bdab
 +    android:layout_width="match_parent"
 +    android:layout_height="wrap_content"
 +    android:layout_marginVertical="6dp"
-+    app:cardCornerRadius="16dp">
++    app:cardCornerRadius="20dp">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:orientation="vertical">
++
++        <!-- Полоса цвета раздела: ставится в ManualFragment из SymbiosisTheme. -->
++        <View
++            android:id="@+id/view_manual_accent"
++            android:layout_width="match_parent"
++            android:layout_height="3dp"
++            android:background="?attr/colorPrimary" />
 +
 +    <LinearLayout
 +        android:layout_width="match_parent"
@@ -2738,6 +3462,8 @@ index 0000000..ff4bdab
 +            android:layout_marginTop="10dp"
 +            android:gravity="end"
 +            android:orientation="horizontal" />
++
++    </LinearLayout>
 +
 +    </LinearLayout>
 +
@@ -2834,7 +3560,7 @@ index 0000000..bae765f
 +</androidx.coordinatorlayout.widget.CoordinatorLayout>
 diff --git a/patch/android/layout/fragment_native_launcher.xml b/patch/android/layout/fragment_native_launcher.xml
 new file mode 100644
-index 0000000..c4dd5b5
+index 0000000..71086da
 --- /dev/null
 +++ b/patch/android/layout/fragment_native_launcher.xml
 @@ -0,0 +1,207 @@
@@ -2859,7 +3585,7 @@ index 0000000..c4dd5b5
 +    android:id="@+id/coordinator_launcher"
 +    android:layout_width="match_parent"
 +    android:layout_height="match_parent"
-+    android:background="?attr/colorSurface">
++    android:background="@drawable/bg_sym_screen">
 +
 +    <com.google.android.material.appbar.AppBarLayout
 +        android:id="@+id/appbar_launcher"
@@ -3047,21 +3773,27 @@ index 0000000..c4dd5b5
 +</androidx.coordinatorlayout.widget.CoordinatorLayout>
 diff --git a/patch/android/layout/item_launcher_tile.xml b/patch/android/layout/item_launcher_tile.xml
 new file mode 100644
-index 0000000..c7759d4
+index 0000000..20666a9
 --- /dev/null
 +++ b/patch/android/layout/item_launcher_tile.xml
-@@ -0,0 +1,106 @@
+@@ -0,0 +1,144 @@
 +<?xml version="1.0" encoding="utf-8"?>
 +<!--
 +SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
 +SPDX-License-Identifier: GPL-3.0-or-later
 +
-+One row in the library. A row, not a tile: the entry for a file that will not
-+launch has to say WHY in words, and a word does not fit under a square cover.
++Одна строка библиотеки.
 +
-+The note on the right is the difference between "the app is broken" and "this
-+file is compressed" - so it is never hidden, and it is coloured when it means
-+something is wrong.
++Цвет ставится в коде ([LauncherTileAdapter] через [SymbiosisTheme]): у каждой
++игры свой оттенок из её Title ID. В разметке цвета намеренно нет — иначе
++пришлось бы держать десяток drawable-файлов и всё равно выбирать нужный
++вручную.
++
++Что здесь появилось ради «игрового» вида и зачем:
++  * view_tile_accent — цветная полоса слева. Она даёт узнать игру по цвету
++    раньше, чем прочитать название: в списке из сотен строк это быстрее.
++  * text_tile_monogram — буква игры в цветном кружке. Обложек у большинства
++    файлов нет, и пустое место слева выглядело как недогруз.
 +-->
 +<com.google.android.material.card.MaterialCardView
 +    xmlns:android="http://schemas.android.com/apk/res/android"
@@ -3071,124 +3803,182 @@ index 0000000..c7759d4
 +    style="?attr/materialCardViewOutlinedStyle"
 +    android:layout_width="match_parent"
 +    android:layout_height="wrap_content"
-+    android:layout_marginVertical="5dp"
++    android:layout_marginVertical="6dp"
 +    android:clickable="true"
 +    android:focusable="true"
 +    android:longClickable="true"
-+    app:cardCornerRadius="16dp">
++    android:foreground="?attr/selectableItemBackground"
++    app:cardCornerRadius="20dp"
++    app:cardElevation="0dp"
++    app:strokeWidth="1dp">
 +
 +    <LinearLayout
 +        android:layout_width="match_parent"
 +        android:layout_height="wrap_content"
-+        android:orientation="vertical"
-+        android:padding="14dp">
++        android:orientation="horizontal">
++
++        <View
++            android:id="@+id/view_tile_accent"
++            android:layout_width="4dp"
++            android:layout_height="match_parent"
++            android:layout_marginVertical="10dp"
++            android:background="?attr/colorPrimary" />
 +
 +        <LinearLayout
 +            android:layout_width="match_parent"
 +            android:layout_height="wrap_content"
-+            android:orientation="horizontal"
-+            android:gravity="center_vertical">
++            android:orientation="vertical"
++            android:paddingStart="12dp"
++            android:paddingTop="12dp"
++            android:paddingEnd="14dp"
++            android:paddingBottom="12dp">
 +
 +            <LinearLayout
-+                android:layout_width="0dp"
++                android:layout_width="match_parent"
 +                android:layout_height="wrap_content"
-+                android:layout_weight="1"
-+                android:orientation="vertical">
++                android:gravity="center_vertical"
++                android:orientation="horizontal">
 +
 +                <TextView
-+                    android:id="@+id/text_tile_title"
-+                    android:layout_width="match_parent"
-+                    android:layout_height="wrap_content"
-+                    android:maxLines="2"
-+                    android:ellipsize="end"
++                    android:id="@+id/text_tile_monogram"
++                    android:layout_width="42dp"
++                    android:layout_height="42dp"
++                    android:gravity="center"
 +                    android:textAppearance="?attr/textAppearanceTitleMedium"
-+                    tools:text="Metroid Dread" />
++                    android:textStyle="bold"
++                    tools:text="M"
++                    tools:textColor="#22D3EE" />
 +
-+                <TextView
-+                    android:id="@+id/text_tile_subtitle"
-+                    android:layout_width="match_parent"
++                <LinearLayout
++                    android:layout_width="0dp"
 +                    android:layout_height="wrap_content"
-+                    android:layout_marginTop="2dp"
-+                    android:maxLines="2"
-+                    android:ellipsize="end"
-+                    android:textAppearance="?attr/textAppearanceBodySmall"
-+                    android:textColor="?attr/colorOnSurfaceVariant"
-+                    tools:text="Nintendo · 01001F5010DCC000" />
++                    android:layout_marginStart="12dp"
++                    android:layout_weight="1"
++                    android:orientation="vertical">
++
++                    <TextView
++                        android:id="@+id/text_tile_title"
++                        android:layout_width="match_parent"
++                        android:layout_height="wrap_content"
++                        android:ellipsize="end"
++                        android:maxLines="2"
++                        android:textAppearance="?attr/textAppearanceTitleMedium"
++                        tools:text="Metroid Dread" />
++
++                    <TextView
++                        android:id="@+id/text_tile_subtitle"
++                        android:layout_width="match_parent"
++                        android:layout_height="wrap_content"
++                        android:layout_marginTop="2dp"
++                        android:ellipsize="end"
++                        android:maxLines="2"
++                        android:textAppearance="?attr/textAppearanceBodySmall"
++                        android:textColor="?attr/colorOnSurfaceVariant"
++                        tools:text="Nintendo · 01001F5010DCC000" />
++
++                </LinearLayout>
++
++                <com.google.android.material.chip.Chip
++                    android:id="@+id/chip_tile_core"
++                    style="@style/Widget.Material3.Chip.Assist"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:layout_marginStart="8dp"
++                    android:clickable="false"
++                    android:focusable="false"
++                    android:textAppearance="?attr/textAppearanceLabelSmall"
++                    android:visibility="gone"
++                    tools:text="kenji"
++                    tools:visibility="visible" />
++
++                <com.google.android.material.chip.Chip
++                    android:id="@+id/chip_tile_badge"
++                    style="@style/Widget.Material3.Chip.Assist"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:layout_marginStart="8dp"
++                    android:clickable="false"
++                    android:focusable="false"
++                    android:textAppearance="?attr/textAppearanceLabelSmall"
++                    tools:text="nsp" />
 +
 +            </LinearLayout>
 +
-+            <com.google.android.material.chip.Chip
-+                android:id="@+id/chip_tile_core"
-+                style="@style/Widget.Material3.Chip.Assist"
-+                android:layout_width="wrap_content"
++            <TextView
++                android:id="@+id/text_tile_note"
++                android:layout_width="match_parent"
 +                android:layout_height="wrap_content"
-+                android:layout_marginStart="8dp"
-+                android:clickable="false"
-+                android:focusable="false"
-+                android:textAppearance="?attr/textAppearanceLabelSmall"
++                android:layout_marginStart="54dp"
++                android:layout_marginTop="6dp"
++                android:textAppearance="?attr/textAppearanceLabelLarge"
++                android:textColor="?attr/colorTertiary"
 +                android:visibility="gone"
-+                tools:text="kenji"
++                tools:text="сжатый · распакует Конвертер"
 +                tools:visibility="visible" />
 +
-+            <com.google.android.material.chip.Chip
-+                android:id="@+id/chip_tile_badge"
-+                style="@style/Widget.Material3.Chip.Assist"
-+                android:layout_width="wrap_content"
-+                android:layout_height="wrap_content"
-+                android:layout_marginStart="10dp"
-+                android:clickable="false"
-+                android:focusable="false"
-+                android:textAppearance="?attr/textAppearanceLabelSmall"
-+                tools:text="nsp" />
-+
 +        </LinearLayout>
-+
-+        <TextView
-+            android:id="@+id/text_tile_note"
-+            android:layout_width="match_parent"
-+            android:layout_height="wrap_content"
-+            android:layout_marginTop="6dp"
-+            android:textAppearance="?attr/textAppearanceLabelLarge"
-+            android:textColor="?attr/colorTertiary"
-+            android:visibility="gone"
-+            tools:text="сжатый"
-+            tools:visibility="visible" />
 +
 +    </LinearLayout>
 +
 +</com.google.android.material.card.MaterialCardView>
 diff --git a/patch/android/layout/item_manual_step.xml b/patch/android/layout/item_manual_step.xml
 new file mode 100644
-index 0000000..08e7dd7
+index 0000000..0b21172
 --- /dev/null
 +++ b/patch/android/layout/item_manual_step.xml
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,58 @@
 +<?xml version="1.0" encoding="utf-8"?>
 +<!--
 +SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
 +SPDX-License-Identifier: GPL-3.0-or-later
 +
-+One step inside a manual section.
++Один шаг внутри раздела руководства.
++
++Номер шага и заголовок стоят в одну строку: текст шага — это объяснение, а
++номер нужен, чтобы «сделайте это первым» читалось без перечитывания абзаца.
++Цвет номера совпадает с цветом раздела (ставится в ManualFragment из
++SymbiosisTheme), поэтому видно, где кончается один раздел и начинается
++следующий, даже если прокрутить середину.
 +-->
 +<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
 +    xmlns:tools="http://schemas.android.com/tools"
 +    android:id="@+id/row_manual_step"
 +    android:layout_width="match_parent"
 +    android:layout_height="wrap_content"
-+    android:layout_marginTop="8dp"
++    android:layout_marginTop="10dp"
 +    android:orientation="vertical">
 +
-+    <TextView
-+        android:id="@+id/text_manual_step_title"
++    <LinearLayout
 +        android:layout_width="match_parent"
 +        android:layout_height="wrap_content"
-+        android:textAppearance="?attr/textAppearanceTitleSmall"
-+        tools:text="1. Ключи и прошивка" />
++        android:gravity="center_vertical"
++        android:orientation="horizontal">
++
++        <TextView
++            android:id="@+id/text_manual_step_number"
++            android:layout_width="26dp"
++            android:layout_height="26dp"
++            android:gravity="center"
++            android:textAppearance="?attr/textAppearanceLabelLarge"
++            android:textStyle="bold"
++            tools:text="1" />
++
++        <TextView
++            android:id="@+id/text_manual_step_title"
++            android:layout_width="0dp"
++            android:layout_height="wrap_content"
++            android:layout_marginStart="10dp"
++            android:layout_weight="1"
++            android:textAppearance="?attr/textAppearanceTitleSmall"
++            tools:text="Ключи и прошивка" />
++
++    </LinearLayout>
 +
 +    <TextView
 +        android:id="@+id/text_manual_step_text"
 +        android:layout_width="match_parent"
 +        android:layout_height="wrap_content"
++        android:layout_marginStart="36dp"
 +        android:layout_marginTop="2dp"
 +        android:textAppearance="?attr/textAppearanceBodySmall"
 +        android:textColor="?attr/colorOnSurfaceVariant"
@@ -5646,6 +6436,256 @@ index 0000000..4d339ae
 +            )
 +        }
 +}
+diff --git a/patch/android/utils/SymbiosisTheme.kt b/patch/android/utils/SymbiosisTheme.kt
+new file mode 100644
+index 0000000..b5365f3
+--- /dev/null
++++ b/patch/android/utils/SymbiosisTheme.kt
+@@ -0,0 +1,244 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++package org.yuzu.yuzu_emu.utils
++
++import kotlin.math.abs
++import kotlin.math.roundToInt
++
++/**
++ * Палитра приложения: один источник цвета для всех экранов.
++ *
++ * ПОЧЕМУ ОТДЕЛЬНЫЙ ФАЙЛ, А НЕ colors.xml
++ *   Цвет здесь зависит не от темы, а от данных: у каждой игры свой оттенок,
++ *   у каждого файла свой цвет формата, у каждого раздела свой акцент. В XML
++ *   такого не выразить — пришлось бы заводить сотню ресурсов и всё равно
++ *   выбирать между ними в коде. Зато чистая функция от строки проверяется
++ *   на хосте: одинаковый Title ID всегда даёт одинаковый цвет, и «плитка
++ *   поменяла цвет после перезапуска» — это тест, а не жалоба.
++ *
++ * ТЁМНАЯ ОСНОВА НАМЕРЕННО
++ *   Игра в эмуляторе — это тёмный экран; светлая панель вокруг него бьёт по
++ *   глазам и съедает контраст картинки. Поэтому база почти чёрная с синим
++ *   уклоном, а цвет приходит акцентами: полоса, кружок с буквой, чип, точка
++ *   у строки настройки.
++ *
++ * ПРАВИЛО ПРО ЧИТАЕМОСТЬ
++ *   Любой акцент проходит через [inkOn]: цвет текста поверх акцента
++ *   выбирается по яркости, а не «белый, потому что красиво». Светло-жёлтый
++ *   чип с белыми буквами — это ровно тот случай, когда «красочно» становится
++ *   нечитаемо.
++ */
++object SymbiosisTheme {
++
++    // ── основа ──────────────────────────────────────────────────────────
++    val BASE = 0xFF0E1116.toInt()        // фон экрана
++    val SURFACE = 0xFF151922.toInt()     // карточка
++    val CARD = 0xFF1B2029.toInt()        // карточка поверх карточки
++    val CARD_HIGH = 0xFF232936.toInt()   // нажатая карточка
++    val TEXT = 0xFFEAF0F6.toInt()
++    val TEXT_DIM = 0xFFA6B2C4.toInt()
++    val OUTLINE = 0xFF2C3444.toInt()
++
++    // ── акценты разделов ────────────────────────────────────────────────
++    val CYAN = 0xFF22D3EE.toInt()      // библиотека
++    val LIME = 0xFFA3E635.toInt()      // папки
++    val AMBER = 0xFFFBBF24.toInt()     // конвертер, предупреждения
++    val VIOLET = 0xFFA78BFA.toInt()    // ключи
++    val PINK = 0xFFF472B6.toInt()      // инструменты, второе ядро
++    val BLUE = 0xFF60A5FA.toInt()      // руководство
++    val MINT = 0xFF34D399.toInt()      // «всё хорошо»
++    val RED = 0xFFF87171.toInt()       // «сюда не пройти»
++
++    /**
++     * Цвет раздела руководства.
++     *
++     * Здесь именно соответствие по смыслу, а не хеш: «с чего начать» —
++     * синий, «файл не запускается» — красный, «два ядра» — розовый, как
++     * второе ядро на всех остальных экранах. Человек, листающий руководство,
++     * узнаёт раздел по цвету раньше, чем прочитает заголовок, и цвет не
++     * должен меняться от того, что раздел передвинули.
++     */
++    fun guideAccent(id: String): Int = when (id.lowercase()) {
++        "start" -> BLUE
++        "library" -> CYAN
++        "dead" -> RED
++        "map" -> LIME
++        "cores" -> PINK
++        "speed" -> AMBER
++        "data" -> VIOLET
++        "trouble" -> 0xFFFB7185.toInt()
++        else -> accent(id)
++    }
++
++    /** Акцент раздела по его ключу. Неизвестный ключ получает свой оттенок. */
++    fun sectionAccent(section: String): Int = when (section.lowercase()) {
++        "library" -> CYAN
++        "folders" -> LIME
++        "converter" -> AMBER
++        "keys" -> VIOLET
++        "tools" -> PINK
++        "guide" -> BLUE
++        "engines" -> MINT
++        "eden" -> 0xFF38BDF8.toInt()
++        "kenji" -> PINK
++        else -> accent(section)
++    }
++
++    // ── цвет игры ───────────────────────────────────────────────────────
++
++    /**
++     * Стабильный хеш строки (FNV-1a).
++     *
++     * Нужен свой, а не [String.hashCode]: тот зафиксирован спецификацией, но
++     * читается как «магия», и на нём легко случайно получить соседние цвета
++     * у соседних Title ID. FNV разбрасывает лучше, а результат всё равно
++     * детерминирован — цвет не «прыгает» между запусками.
++     */
++    fun stableHash(key: String): Int {
++        var h = -2128831035
++        for (ch in key) {
++            h = h xor ch.code
++            h *= 16777619
++        }
++        return h and 0x7FFFFFFF
++    }
++
++    /**
++     * Оттенок для игры: стабильный, яркий, но не кислотный.
++     *
++     * Насыщенность и светлота гуляют в узких пределах намеренно: цвета
++     * должны различаться между собой, но не спорить с белым текстом поверх.
++     */
++    fun accent(key: String): Int {
++        val h = stableHash(key)
++        val hue = (h % 360).toFloat()
++        val sat = 0.58f + (h / 360 % 14) / 100f     // 0.58 … 0.71
++        val light = 0.58f + (h / 5040 % 8) / 100f   // 0.58 … 0.65
++        return hsl(hue, sat, light)
++    }
++
++    /** Второй оттенок для градиента: тот же цвет, сдвинутый по кругу. */
++    fun accentPartner(key: String): Int {
++        val h = stableHash(key)
++        val hue = ((h % 360) + 28).toFloat()
++        return hsl(hue, 0.55f, 0.62f)
++    }
++
++    /**
++     * Фон плитки: от почти чёрного к цвету игры.
++     *
++     * Градиент слабый (16 %) и вертикальный: карточка должна намекать на
++     * цвет, а не перекрашиваться целиком — иначе названия игр перестают
++     * читаться на пёстром фоне.
++     */
++    fun tileGradient(key: String): Pair<Int, Int> =
++        mix(CARD, accent(key), 0.16f) to CARD
++
++    // ── формат файла ────────────────────────────────────────────────────
++
++    /**
++     * Цвет по метке формата.
++     *
++     * Формат — единственное, что человек ищет глазами в списке из сотен
++     * строк: `nsp` и `xci` должны различаться цветом, а не прочтением.
++     */
++    fun formatColor(badge: String): Int = when (badge.lowercase().trim()) {
++        "nsp" -> CYAN
++        "xci" -> LIME
++        "nsz" -> AMBER
++        "dlc", "nsp+dlc" -> VIOLET
++        "upd", "обновление" -> BLUE
++        "" -> TEXT_DIM
++        else -> accent(badge)
++    }
++
++    // ── буква на плитке ─────────────────────────────────────────────────
++
++    /**
++     * Буква-монограмма для игры: первая осмысленная буква названия.
++     *
++     * Артикли пропускаются: у половины библиотеки это «The», и все плитки
++     * получили бы одну и ту же букву. Если буквы нет вовсе — берётся первая
++     * цифра, иначе решётка.
++     */
++    fun monogram(title: String): String {
++        val cleaned = title.trim()
++        if (cleaned.isEmpty()) return "#"
++        val words = cleaned.split(' ', '\t', '\n').filter { it.isNotEmpty() }
++        val skip = setOf("the", "a", "an", "super", "new")
++        // Идём по словам, а не берём первое: «🎮 Mario» — первый токен вообще
++        // не слово, и монограмма из решётки на половине библиотеки выглядела
++        // бы как сломанная иконка.
++        for (word in words) {
++            if (word.lowercase().trim('.', ':', '-') in skip) continue
++            val ch = word.firstOrNull { it.isLetterOrDigit() }
++            if (ch != null) return ch.uppercase()
++        }
++        // Название целиком из артикля («The») — решётка была бы загадкой,
++        // поэтому берём его первую букву.
++        return cleaned.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "#"
++    }
++
++    // ── мелочи, без которых «красиво» ломается ──────────────────────────
++
++    /**
++     * Цвет текста поверх [background]: тёмный или светлый, по яркости.
++     *
++     * Порог 0.19 — не «эстетическая середина», а точка, где оба варианта
++     * дают одинаковый контраст. При нём относительный контраст не падает
++     * ниже 4.2:1 ни для одного из наших акцентов (проверяется тестом).
++     * Порог 0.5, который так и просится, оставляет узкую полосу цветов,
++     * где нечитаемо и белое, и тёмное.
++     */
++    fun inkOn(background: Int): Int = if (luminance(background) > 0.19f) BASE else TEXT
++
++    /** Тот же цвет с прозрачностью — для подложек и обводок. */
++    fun soft(color: Int, alpha: Float): Int {
++        val a = (alpha.coerceIn(0f, 1f) * 255).roundToInt()
++        return (a shl 24) or (color and 0x00FFFFFF)
++    }
++
++    /** Смешение двух цветов: t = 0 → [a], t = 1 → [b]. Альфа берётся у [a]. */
++    fun mix(a: Int, b: Int, t: Float): Int {
++        val k = t.coerceIn(0f, 1f)
++        fun ch(shift: Int): Int {
++            val ca = (a shr shift) and 0xFF
++            val cb = (b shr shift) and 0xFF
++            return (ca + (cb - ca) * k).roundToInt().coerceIn(0, 255)
++        }
++        return ((a ushr 24) shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
++    }
++
++    /** Относительная яркость по WCAG: по ней и решается, какой цвет текста. */
++    fun luminance(color: Int): Float {
++        fun lin(c: Int): Float {
++            val v = c / 255f
++            return if (v <= 0.03928f) v / 12.92f else Math.pow(((v + 0.055f) / 1.055f).toDouble(), 2.4).toFloat()
++        }
++        val r = lin((color shr 16) and 0xFF)
++        val g = lin((color shr 8) and 0xFF)
++        val b = lin(color and 0xFF)
++        return 0.2126f * r + 0.7152f * g + 0.0722f * b
++    }
++
++    /** HSL → ARGB. Своя, потому что android.graphics недоступен в тесте. */
++    fun hsl(hue: Float, sat: Float, light: Float): Int {
++        val h = ((hue % 360f) + 360f) % 360f / 60f
++        val s = sat.coerceIn(0f, 1f)
++        val l = light.coerceIn(0f, 1f)
++        val c = (1f - abs(2f * l - 1f)) * s
++        val x = c * (1f - abs(h % 2f - 1f))
++        val (r1, g1, b1) = when {
++            h < 1f -> Triple(c, x, 0f)
++            h < 2f -> Triple(x, c, 0f)
++            h < 3f -> Triple(0f, c, x)
++            h < 4f -> Triple(0f, x, c)
++            h < 5f -> Triple(x, 0f, c)
++            else -> Triple(c, 0f, x)
++        }
++        val m = l - c / 2f
++        fun ch(v: Float) = ((v + m).coerceIn(0f, 1f) * 255f).roundToInt()
++        return (255 shl 24) or (ch(r1) shl 16) or (ch(g1) shl 8) or ch(b1)
++    }
++}
 diff --git a/patch/android/values/strings-en.xml b/patch/android/values/strings-en.xml
 index 1285646..d9ada13 100644
 --- a/patch/android/values/strings-en.xml
@@ -6526,11 +7566,191 @@ index 0000000..9f4530e
 +        kotlin.system.exitProcess(1)
 +    }
 +}
+diff --git a/tests/SymbiosisThemeTest.kt b/tests/SymbiosisThemeTest.kt
+new file mode 100644
+index 0000000..cf7ac0a
+--- /dev/null
++++ b/tests/SymbiosisThemeTest.kt
+@@ -0,0 +1,174 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++/**
++ * Проверки палитры. Запускаются на хосте, без Android.
++ *
++ * Почему это вообще тест: цвет здесь вычисляется из данных, а не лежит в
++ * ресурсах. Значит у него есть те же свойства, что у любой другой логики —
++ * он может «поплыть» между запусками, слипнуться у соседних игр или дать
++ * нечитаемый текст. Всё это видно без телефона.
++ */
++
++import org.yuzu.yuzu_emu.utils.SymbiosisTheme
++
++private var passed = 0
++private val failures = mutableListOf<String>()
++
++private fun check(what: String, ok: Boolean, detail: String = "") {
++    if (ok) {
++        passed++
++    } else {
++        failures.add("$what${if (detail.isEmpty()) "" else " → $detail"}")
++    }
++}
++
++private fun <T> eq(what: String, got: T, want: T) =
++    check(what, got == want, "получено [$got], ожидалось [$want]")
++
++private fun hex(c: Int) = "#%08X".format(c)
++
++private fun contrast(a: Int, b: Int): Float {
++    val la = SymbiosisTheme.luminance(a)
++    val lb = SymbiosisTheme.luminance(b)
++    val hi = maxOf(la, lb)
++    val lo = minOf(la, lb)
++    return (hi + 0.05f) / (lo + 0.05f)
++}
++
++fun main() {
++    // ── 1. хеш ─────────────────────────────────────────────────────────
++    eq("хеш устойчив", SymbiosisTheme.stableHash("010093801237C000"), 0.let {
++        SymbiosisTheme.stableHash("010093801237C000")
++    })
++    check(
++        "хеш неотрицателен",
++        listOf("", "a", "010093801237C000", "Ω-тест").all { SymbiosisTheme.stableHash(it) >= 0 }
++    )
++    check(
++        "разные ключи — разные хеши",
++        SymbiosisTheme.stableHash("Splatoon 3") != SymbiosisTheme.stableHash("Splatoon 2")
++    )
++
++    // ── 2. цвет игры ───────────────────────────────────────────────────
++    val titles = listOf(
++        "010093801237C000", "0100F2C0115B6000", "0100C2500FC20000",
++        "010074F013262000", "0100152000022000", "01006A800016E000",
++        "0100E95004038000", "010016A00AEC0000", "010015100B514000"
++    )
++    val accents = titles.map { SymbiosisTheme.accent(it) }
++    check("цвет игры стабилен", accents == titles.map { SymbiosisTheme.accent(it) })
++    check(
++        "у девяти игр девять разных цветов",
++        accents.toSet().size == titles.size,
++        "${accents.toSet().size} из ${titles.size}"
++    )
++    check("цвет игры непрозрачный", accents.all { (it ushr 24) == 0xFF })
++    check(
++        "соседние Title ID не слипаются",
++        run {
++            val a = SymbiosisTheme.accent("0100000000010000")
++            val b = SymbiosisTheme.accent("0100000000010001")
++            a != b
++        }
++    )
++
++    // ── 3. читаемость ──────────────────────────────────────────────────
++    val inkProblems = accents.mapNotNull { bg ->
++        val ink = SymbiosisTheme.inkOn(bg)
++        val c = contrast(bg, ink)
++        if (c < 4.2f) "${hex(bg)} на ${hex(ink)} — ${"%.2f".format(c)}:1" else null
++    }
++    check("текст на акценте читается (≥4.2:1)", inkProblems.isEmpty(), inkProblems.joinToString("; "))
++    check("на белом — тёмный текст", SymbiosisTheme.inkOn(0xFFFFFFFF.toInt()) == SymbiosisTheme.BASE)
++    check("на чёрном — светлый текст", SymbiosisTheme.inkOn(0xFF000000.toInt()) == SymbiosisTheme.TEXT)
++
++    // ── 4. разделы ─────────────────────────────────────────────────────
++    eq("библиотека — циан", SymbiosisTheme.sectionAccent("library"), SymbiosisTheme.CYAN)
++    eq("инструменты — розовый", SymbiosisTheme.sectionAccent("tools"), SymbiosisTheme.PINK)
++    eq("второе ядро — розовый", SymbiosisTheme.sectionAccent("Kenji"), SymbiosisTheme.PINK)
++    check(
++        "разделы различимы по цвету",
++        listOf("library", "folders", "converter", "keys", "tools", "guide", "engines")
++            .map { SymbiosisTheme.sectionAccent(it) }.toSet().size == 7
++    )
++    check(
++        "неизвестный раздел получает свой цвет, а не серый",
++        SymbiosisTheme.sectionAccent("нечто") != SymbiosisTheme.OUTLINE
++    )
++
++    // ── 4b. разделы руководства ────────────────────────────────────────
++    eq("«два ядра» — розовые, как второе ядро", SymbiosisTheme.guideAccent("cores"), SymbiosisTheme.PINK)
++    eq("«файл не запускается» — красный", SymbiosisTheme.guideAccent("dead"), SymbiosisTheme.RED)
++    eq("«с чего начать» — синий", SymbiosisTheme.guideAccent("start"), SymbiosisTheme.BLUE)
++    check(
++        "все разделы руководства разного цвета",
++        listOf("start", "library", "dead", "map", "cores", "speed", "data", "trouble")
++            .map { SymbiosisTheme.guideAccent(it) }.toSet().size == 8
++    )
++    check(
++        "неизвестный раздел не падает и получает цвет",
++        SymbiosisTheme.guideAccent("приложение") != 0
++    )
++
++    // ── 5. форматы файлов ──────────────────────────────────────────────
++    eq("nsp — циан", SymbiosisTheme.formatColor("nsp"), SymbiosisTheme.CYAN)
++    eq("xci — лайм", SymbiosisTheme.formatColor("XCI"), SymbiosisTheme.LIME)
++    eq("nsz — янтарь", SymbiosisTheme.formatColor("nsz"), SymbiosisTheme.AMBER)
++    eq("dlc — фиолетовый", SymbiosisTheme.formatColor("DLC"), SymbiosisTheme.VIOLET)
++    eq("пустая метка — вторичный текст", SymbiosisTheme.formatColor(""), SymbiosisTheme.TEXT_DIM)
++    check(
++        "три формата — три разных цвета",
++        setOf("nsp", "xci", "nsz").map { SymbiosisTheme.formatColor(it) }.toSet().size == 3
++    )
++
++    // ── 6. монограмма ──────────────────────────────────────────────────
++    eq("артикль пропускается", SymbiosisTheme.monogram("The Legend of Zelda"), "L")
++    eq("обычное название", SymbiosisTheme.monogram("metroid dread"), "M")
++    eq("артикль A пропускается", SymbiosisTheme.monogram("A Short Hike"), "S")
++    eq("цифра тоже годится", SymbiosisTheme.monogram("007 First Light"), "0")
++    eq("пустое название", SymbiosisTheme.monogram("   "), "#")
++    eq("название из артикля", SymbiosisTheme.monogram("The"), "T")
++    eq("эмодзи не ломает", SymbiosisTheme.monogram("🎮 Mario"), "M")
++
++    // ── 7. арифметика цвета ────────────────────────────────────────────
++    eq("hsl красный", SymbiosisTheme.hsl(0f, 1f, 0.5f), 0xFFFF0000.toInt())
++    eq("hsl зелёный", SymbiosisTheme.hsl(120f, 1f, 0.5f), 0xFF00FF00.toInt())
++    eq("hsl синий", SymbiosisTheme.hsl(240f, 1f, 0.5f), 0xFF0000FF.toInt())
++    eq("отрицательный оттенок заворачивается", SymbiosisTheme.hsl(-120f, 1f, 0.5f), 0xFF0000FF.toInt())
++    eq("оттенок больше 360 заворачивается", SymbiosisTheme.hsl(480f, 1f, 0.5f), 0xFF00FF00.toInt())
++    eq("серый — без насыщенности", SymbiosisTheme.hsl(200f, 0f, 0.5f), 0xFF808080.toInt())
++
++    eq("mix в начале", SymbiosisTheme.mix(SymbiosisTheme.CARD, SymbiosisTheme.CYAN, 0f), SymbiosisTheme.CARD)
++    eq("mix в конце", SymbiosisTheme.mix(SymbiosisTheme.CARD, SymbiosisTheme.CYAN, 1f) and 0xFFFFFF, SymbiosisTheme.CYAN and 0xFFFFFF)
++    check(
++        "mix посередине — между",
++        run {
++            val mid = SymbiosisTheme.mix(0xFF000000.toInt(), 0xFFFFFFFF.toInt(), 0.5f) and 0xFF
++            mid in 120..135
++        }
++    )
++    eq("прозрачность 20%", (SymbiosisTheme.soft(SymbiosisTheme.CYAN, 0.2f) ushr 24), 51)
++    eq("прозрачность не портит цвет", SymbiosisTheme.soft(SymbiosisTheme.CYAN, 0.2f) and 0xFFFFFF, SymbiosisTheme.CYAN and 0xFFFFFF)
++    eq("альфа зажата снизу", (SymbiosisTheme.soft(SymbiosisTheme.CYAN, -1f) ushr 24), 0)
++    eq("альфа зажата сверху", (SymbiosisTheme.soft(SymbiosisTheme.CYAN, 9f) ushr 24), 255)
++    eq("яркость белого", SymbiosisTheme.luminance(0xFFFFFFFF.toInt()), 1.0f)
++    eq("яркость чёрного", SymbiosisTheme.luminance(0xFF000000.toInt()), 0.0f)
++
++    // ── 8. фон плитки ──────────────────────────────────────────────────
++    val (top, bottom) = SymbiosisTheme.tileGradient("010093801237C000")
++    check("у градиента два разных конца", top != bottom)
++    check("низ плитки — обычная карточка", bottom == SymbiosisTheme.CARD)
++    check("верх подкрашен цветом игры", top != SymbiosisTheme.CARD)
++    check("подкраска слабая, текст читается", contrast(top, SymbiosisTheme.TEXT) > 8f,
++        "%.1f".format(contrast(top, SymbiosisTheme.TEXT)))
++    check("партнёр по градиенту отличается от основного", SymbiosisTheme.accentPartner("kenji") != SymbiosisTheme.accent("kenji"))
++
++    // ── итог ───────────────────────────────────────────────────────────
++    println()
++    failures.forEach { println("FAIL  $it") }
++    println("passed=$passed failed=${failures.size}")
++    if (failures.isNotEmpty()) {
++        kotlin.system.exitProcess(1)
++    }
++}
 diff --git a/tools/run_tests.sh b/tools/run_tests.sh
-index c52fdb1..dc4bbde 100644
+index c52fdb1..f931747 100644
 --- a/tools/run_tests.sh
 +++ b/tools/run_tests.sh
-@@ -104,10 +104,44 @@ done
+@@ -104,10 +104,47 @@ done
  
  # Kotlin tests, when a compiler is available.
  if command -v kotlinc >/dev/null 2>&1; then
@@ -6553,6 +7773,9 @@ index c52fdb1..dc4bbde 100644
 +      # The hybrid decides which Eden setting reaches the second core, and
 +      # which stays its own. Plain Kotlin, so it compiles against the real file.
 +      EngineHybridTest) echo "$HERE/patch/android/utils/EngineHybrid.kt" ;;
++      # Палитра: цвет игры, читаемость текста, монограммы. Чистые функции —
++      # поэтому проверяются без Android.
++      SymbiosisThemeTest) echo "$HERE/patch/android/utils/SymbiosisTheme.kt" ;;
 +      *)                echo "" ;;
 +    esac
 +  }
