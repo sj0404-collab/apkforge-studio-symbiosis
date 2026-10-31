@@ -4,9 +4,14 @@
 (`classes.dex`, `AndroidManifest.xml`, `resources.arsc`, подпись v1 + v2) прямо
 в браузере, без бэкенда и без установки Android SDK.
 
-**Symbiosis** — форк эмулятора Eden под ARM Mali. Его домашний экран — это
-`library.html`, страница в WebView, которая получает библиотеку игр из Kotlin
-через `window.Symbiosis`.
+**Symbiosis** — форк эмулятора Eden под ARM Mali. Его домашний экран теперь
+**нативный**: `NativeLauncherFragment` на настоящих Android-представлениях, без
+WebView. Страница `library.html` осталась в APK, но переехала на вторые роли —
+это «Расширенная панель» в «Инструментах» (пространства, выбор ядра, тонкие
+переключатели).
+
+У приложения появилось **руководство пользования** — экран «Руководство» с
+поиском и кнопками перехода, и тот же текст файлом: [`docs/GUIDE.md`](docs/GUIDE.md).
 
 Этот репозиторий — то и другое вместе: IDE, в которую встроена лаборатория,
 где **настоящая** страница Symbiosis запускается с настоящим мостом и
@@ -36,6 +41,28 @@ npm run test:lab   # те же проверки из командной стро
 | `docs/VERIFICATION.md` | команды и вывод: цифры, а не обещания |
 
 ---
+
+## Нативный лаунчер и руководство
+
+Стартовый экран больше не страница в WebView. Причина простая: половина
+логики жила в JavaScript, половина в Kotlin, и на вопрос «где что находится»
+ответить было нельзя — ни пользователю, ни по коду.
+
+| Файл | Что внутри |
+|---|---|
+| `patch/android/utils/NativeLibraryPresenter.kt` | что показывает библиотека и что делает нажатие: порядок, бейджи, пометки, строка сводки, русские склонения, тексты диалогов |
+| `patch/android/fragments/NativeLauncherFragment.kt` | стартовый экран; решений не принимает, только рисует модель |
+| `patch/android/adapters/LauncherTileAdapter.kt` | одна плитка на файл: название, разработчик/Title ID, формат, пометка |
+| `patch/android/utils/Manual.kt` | текст руководства: 7 разделов, 33 шага |
+| `patch/android/fragments/ManualFragment.kt` | экран «Руководство»: поиск, карточки, кнопки перехода на нужный экран |
+| `patch/android/utils/ConverterPicker.kt` | один поток «выбрать файл → распаковать» для лаунчера и руководства |
+| `patch/android/navigation/home_navigation.xml` | `startDestination=@id/nativeLauncherFragment` |
+| `tests/NativeLibraryPresenterTest.kt` | 68 проверок: логика, тексты, разделы руководства и сверка с навигацией |
+
+Что видно на экране: шесть кнопок сверху (Искать игры, Папки, Конвертер, Ключи,
+Инструменты, Руководство), поиск, три фильтра и список **всех** файлов из
+выбранных папок. У нерабочего файла — причина словами и действие: распаковать,
+«где ключи», объяснить про части разрезанного образа.
 
 ## Symbiosis Lab
 
@@ -75,8 +102,9 @@ ok  ни одна строка не пустая
 
 Живут там же, где код: **ветка `fix/library-sees-all-games`, PR #3** в
 [sj0404-collab/symbiosis](https://github.com/sj0404-collab/symbiosis/pull/3).
-Их собственный прогон `Tests` на этой ветке: `passed=36 failed=0 skipped=3`,
-`LibraryIndexTest — passed=65 failed=0`.
+Их собственный прогон: `LibraryIndexTest — passed=65 failed=0`,
+`NativeLibraryPresenterTest — passed=68 failed=0`. Сборка APK идёт в GitHub
+Actions (`.github/workflows/build.yml`), последняя — run `41191000653`.
 
 ```
 symbiosis/changes.patch     # git diff против текущего main
@@ -92,7 +120,7 @@ git apply /path/to/symbiosis/changes.patch
 # или скопировать файлы из symbiosis/files поверх дерева
 ```
 
-Затронуто восемь файлов:
+Затронуто три десятка файлов; ниже — те, что несут смысл:
 
 | Файл | Что делает теперь |
 |---|---|
@@ -102,7 +130,13 @@ git apply /path/to/symbiosis/changes.patch
 | `patch/android/utils/LivePanel.kt` | `libraryReport()`, `runnable`/`kind` у каждой игры, сжатые в списке |
 | `patch/android/fragments/LivePanelFragment.kt` | мост: `convertPath()`, `libraryReport()`; версия моста 17 |
 | `docs/library.html` + `patch/android/assets/library.html` | бейджи, фильтр «Не запускается», сводка, экран «почему?», кнопка «Распаковать» |
+| `patch/android/fragments/NativeLauncherFragment.kt` | **новый**: стартовый экран вместо WebView |
+| `patch/android/fragments/ManualFragment.kt` + `patch/android/utils/Manual.kt` | **новые**: инструкция пользования внутри приложения |
+| `patch/android/navigation/home_navigation.xml` | стартовый экран — `nativeLauncherFragment`; панель больше не домашняя |
+| `patch/android/fragments/ToolsFragment.kt` | «Руководство» в инструментах; старая панель названа «Расширенная панель» |
+| `docs/GUIDE.md` | **новый**: инструкция пользования текстом |
 | `tests/LibraryIndexTest.kt` | **новый**: 65 проверок, включая сверку с исходниками |
+| `tests/NativeLibraryPresenterTest.kt` | **новый**: 68 проверок лаунчера и руководства |
 | `tools/run_tests.sh` | Kotlin-тест собирается со своими зависимостями; ошибка сборки печатается, а не глотается |
 
 Подробности — `docs/BUGS-FOUND.md`.
@@ -111,9 +145,12 @@ git apply /path/to/symbiosis/changes.patch
 
 ## Ограничения, о которых нужно сказать вслух
 
-* **Сборка APK не проверена.** Здесь нет ни NDK, ни Eden: правки к Symbiosis
-  проверены на хосте (Kotlin-тесты + JSDOM), но `assembleLegacyDebug` и запуск
-  на телефоне — за вами.
+* **На телефоне не запускалось.** APK собирается в GitHub Actions (последний
+  успешный — `41188743583`), но ни один прогон здесь не проверял его на
+  Mali-G57: FPS, реальные `prod.keys` и поведение 8 ГБ памяти — за вами.
+* **Нативный экран проверен на хосте, не в эмуляторе.** Логика (presenter,
+  руководство, навигация) покрыта 68 проверками, которые идут без Android;
+  сама вёрстка проверяется только сборкой.
 * **JSDOM — не браузер.** Он не считает CSS-переменные и раскладку; проверка
   темы поэтому смотрит объявление палитры, а не итоговый цвет.
 * **Мост в лаборатории синтетический.** Он отвечает теми же JSON-структурами,

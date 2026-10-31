@@ -1,3 +1,189 @@
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+index d614e4d..a8dd809 100644
+--- a/.github/workflows/build.yml
++++ b/.github/workflows/build.yml
+@@ -268,7 +268,12 @@ jobs:
+           esac
+ 
+           if [ "$MINIFIED" = 0 ]; then
+-            for sym in restoreGameDirs rememberGameDirs hasActionableButton; do
++            # Зачем: лаунчер и руководство - это два новых экрана, и оба
++            # попадают в APK только если apply_patch.sh их скопировал. Файл,
++            # лежащий в patch/, но не в дереве сборки, даёт зелёную сборку с
++            # прежним интерфейсом - ровно это и проверяем.
++            for sym in restoreGameDirs rememberGameDirs hasActionableButton \
++                       NativeLauncherFragment ManualFragment NativeLibraryPresenter; do
+               if strings classes*.dex | grep -q "$sym"; then echo "  ok   $sym in dex"
+               else echo "  MISSING $sym"; fail=1; fi
+             done
+diff --git a/README.md b/README.md
+index 3a98d4c..db55cb1 100644
+--- a/README.md
++++ b/README.md
+@@ -5,6 +5,24 @@ A fork of the [Eden](https://git.eden-emu.dev/eden-emu/eden) Android emulator, t
+ 
+ Target hardware for this work: **Mali-G57 MC2 / MediaTek MT6789, 8 GB RAM (~5 GB usable)**.
+ 
++## Where everything is
++
++The app opens on a **native library screen** — real Android views, not a WebView page. Six
++buttons across the top: *Rescan*, *Folders*, *Converter*, *Keys*, *Tools*, *Guide*. Every file
++in the selected folders gets a row; a file that cannot launch says why in words instead of
++disappearing.
++
++**New here? Read [`docs/GUIDE.md`](docs/GUIDE.md)** — the same manual that ships inside the
++app under *Guide*, with a search box. It covers, in order: keys → folder → launch, what the
++badges mean, what to do with a compressed NSZ, where every screen lives, and what to check
++first when a game will not start.
++
++Why the rewrite: the start screen used to be an HTML page inside a WebView. File handling and
++"what to offer" lived in JavaScript, settings lived in Kotlin, the layout lived in an HTML
++string, and the honest answer to "where is it?" was "depends which half". The screen no longer
++decides anything: `NativeLibraryPresenter` builds the rows, `Manual` holds the text, and both
++are plain Kotlin checked by a host test, so the layout cannot silently disagree with the logic.
++
+ ---
+ 
+ ## Why this fork exists
+@@ -54,6 +72,7 @@ tests/
+   SetupPageTest.kt        setup-page visibility logic
+   test_l10n.py            Russian localisation checks
+ docs/
++  GUIDE.md                user manual: how to use the app and where everything is
+   BUGS.md                 every bug found, with evidence
+ ```
+ 
+diff --git a/docs/GUIDE.md b/docs/GUIDE.md
+new file mode 100644
+index 0000000..2e3a893
+--- /dev/null
++++ b/docs/GUIDE.md
+@@ -0,0 +1,125 @@
++# Symbiosis: инструкция пользования
++
++Тот же текст есть в приложении: **Руководство** (кнопка на стартовом экране, а также
++«Инструменты» → «Руководство пользования»). Если инструкция и приложение когда-нибудь
++разойдутся, права инструкция: она проверяется тестом на то, что каждый раздел ссылается
++на существующий экран (`tests/NativeLibraryPresenterTest.kt`).
++
++Версия текста: 1.
++
++---
++
++## 1. С чего начать: три шага
++
++Порядок важен. Пока нет ключей, ни один дамп не откроется, и пустой список будет
++выглядеть как «папка не та», хотя дело не в ней.
++
++1. **Ключи и прошивка.** «Ключи» → `prod.keys`, затем файлы прошивки. Без них заголовок
++   файла зашифрован: приложение видит файл, но не знает, что это за игра, и помечает его
++   «нет ключей».
++2. **Папка с играми.** «Папки» → «Добавить папку». Выберите папку, где лежат NSP, XCI,
++   NCA или сжатые NSZ. Папок может быть несколько, вложенность читается.
++3. **Нажать игру.** Вернитесь на стартовый экран: игры уже в списке. Нажатие запускает
++   игру, долгое нажатие открывает её свойства — масштаб, драйвер, сейвы.
++
++---
++
++## 2. Экран библиотеки: что означают значки
++
++Стартовый экран — нативная библиотека. Список показывает **все** файлы в выбранных
++папках, а не только те, что запускаются. Поэтому «игр нет» больше не значит
++«файлы не нашлись».
++
++| Что видно | Что это значит |
++|---|---|
++| Строка сверху | Счёт по всем папкам без фильтров: `12 игр · 3 обновления · 40 сжатых → Конвертер · 2 не читаются` |
++| Метка на плитке | Формат файла: `nsp`, `xci`, `nca`, `nro`. Обновления и DLC стоят рядом со своей игрой отдельными плитками |
++| Пометка «сжатый» | Образ упакован (NSZ/XCZ/NCZ). Сначала распаковывается — Конвертером |
++| Пометка «нет ключей» | Заголовок не расшифровался: нужны `prod.keys` и прошивка |
++| Пометка «часть» | Разрезанный образ: `.nsp.00`, `.nsp.01` … нужны все части |
++| Фильтры | «Все файлы» / «Запускается» / «Не запускается» |
++| Поиск | Ищет по названию, Title ID и имени файла |
++| Долгое нажатие | Свойства конкретной игры: настройки только для неё, сейвы, удаление |
++
++---
++
++## 3. Файл виден, но не запускается
++
++Нажмите такую плитку — приложение скажет причину словами и предложит действие.
++
++| Причина | Что делать |
++|---|---|
++| Сжатый NSZ / XCZ / NCZ | «Конвертер» → выбрать файл → подождать. Распаковка идёт на телефоне и занимает столько же места, сколько сам образ: освободите его заранее. Готовый NSP появится в папке конвертера и сразу в библиотеке |
++| Часть разрезанного образа (`.nsp.00`, `.xci.01`) | Ядро открывает только целый файл. Положите все части в одну папку — библиотека склеит их в одну игру |
++| Нет ключей | «Ключи» → `prod.keys`, затем прошивка. После установки нажмите «Искать игры»: заголовки расшифруются. Файлы при этом никуда не переносятся |
++
++---
++
++## 4. Где что лежит
++
++Главное — на стартовом экране. Остальное открывается кнопками сверху и из «Инструментов».
++
++| Экран | Что там |
++|---|---|
++| **Библиотека** (стартовый) | Игры, поиск, фильтры, запуск, свойства игры по долгому нажатию |
++| **Папки** | Откуда берутся игры: добавить или убрать папку, посмотреть, что внутри |
++| **Конвертер** | Распаковка сжатых образов; здесь же очередь и готовые NSP |
++| **Ключи** | `prod.keys` и прошивка консоли |
++| **Инструменты** | Подбор FPS, диагностика, движки, утилиты ROM, сейвы, лаунчеры, справочник настроек, руководство |
++| **Руководство** | Эта инструкция, с поиском |
++| **Расширенная панель** | Старая универсальная панель: пространства, выбор ядра, тонкие переключатели. Для обычной игры не нужна |
++
++Кнопки стартового экрана, слева направо: **Искать игры**, **Папки**, **Конвертер**,
++**Ключи**, **Инструменты**, **Руководство**.
++
++---
++
++## 5. Если медленно
++
++На Mali-G57 с 8 ГБ помогает не «включить всё», а изменить три вещи.
++
++- **Масштаб 0.75x.** Настройки → Графика → Разрешение. Заметная часть работы GPU уходит
++  на пиксели, которых на экране телефона не видно.
++- **Подбор FPS.** «Инструменты» → «Подбор FPS»: ставит настройки под это устройство,
++  а не «максимум качества».
++- **Диагностика.** Показывает, какие настройки доехали до драйвера, а какие Mali молча
++  выбросил. «Включено, но не работает» здесь — обычное дело.
++
++---
++
++## 6. Сейвы, папка данных, перенос
++
++- **Где сейвы.** Папка данных (по умолчанию — внутренняя память приложения) → `saves`.
++  Свойства игры показывают «сейв 128 КБ», если он уже есть.
++- **Сменить папку данных.** «Инструменты» → «Утилиты» → сменить папку данных, затем
++  перезапустить приложение. Папку с играми это не затрагивает.
++- **Перенос на другой телефон.** Скопируйте папку данных целиком: там сейвы, шейдеры и
++  настройки игр. Игры можно не копировать — достаточно заново указать папку.
++
++---
++
++## 7. Если что-то не так: порядок проверки
++
++Проверяйте сверху вниз, пока не найдётся причина. Каждый пункт — один экран.
++
++1. **Список пуст.** «Папки» → добавить папку. Если папка уже есть — потяните список вниз:
++   это повторный обход.
++2. **Игра не запускается.** Нажмите плитку: причина будет в диалоге. Чаще всего — нет
++   ключей или образ сжатый.
++3. **Чёрный экран или вылет.** «Инструменты» → «Диагностика» → отчёт о запуске: видно,
++   что ядро приняло, а что выбросило.
++4. **Одна игра идёт, другая нет.** «Инструменты» → «Движки»: переключите Eden на Kenji-NX.
++   Игра, которая не идёт на одном, иногда идёт на другом.
++
++---
++
++## Где это в коде
++
++| Файл | Что внутри |
++|---|---|
++| `patch/android/utils/NativeLibraryPresenter.kt` | Что показывает библиотека и что делает нажатие: порядок, бейджи, действия, строка сводки, тексты диалогов |
++| `patch/android/utils/Manual.kt` | Текст этой инструкции; экран рисует его, тест проверяет ссылки |
++| `patch/android/fragments/NativeLauncherFragment.kt` | Стартовый экран; не принимает решений, только рисует модель |
++| `patch/android/fragments/ManualFragment.kt` | Экран руководства с поиском и кнопками перехода |
++| `patch/android/navigation/home_navigation.xml` | `startDestination=@id/nativeLauncherFragment` |
++| `tests/NativeLibraryPresenterTest.kt` | 68 проверок: логика лаунчера, тексты, разделы руководства, дрейф с навигацией |
 diff --git a/docs/library.html b/docs/library.html
 index 9553244..4dc70fc 100644
 --- a/docs/library.html
@@ -515,6 +701,111 @@ index 9553244..4dc70fc 100644
  loadGames();
  loadStatus();
  applyPlugins();
+diff --git a/patch/android/adapters/LauncherTileAdapter.kt b/patch/android/adapters/LauncherTileAdapter.kt
+new file mode 100644
+index 0000000..fad220d
+--- /dev/null
++++ b/patch/android/adapters/LauncherTileAdapter.kt
+@@ -0,0 +1,99 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++package org.yuzu.yuzu_emu.adapters
++
++import android.util.TypedValue
++import android.view.LayoutInflater
++import android.view.View
++import android.view.ViewGroup
++import android.widget.TextView
++import androidx.core.view.isVisible
++import androidx.recyclerview.widget.RecyclerView
++import org.yuzu.yuzu_emu.R
++import org.yuzu.yuzu_emu.utils.NativeLibraryPresenter
++
++/**
++ * Список библиотеки: одна плитка на файл.
++ *
++ * Адаптер ничего не решает. Что показать, в каком порядке и что будет по
++ * нажатию - это [NativeLibraryPresenter], который проверяется тестом на
++ * хосте. Здесь только findViewById и подстановка строк, поэтому «плитка
++ * исчезла» или «пометка пропала» можно починить, не трогая логику.
++ */
++class LauncherTileAdapter(
++    private val onClick: (NativeLibraryPresenter.Item) -> Unit,
++    private val onLongClick: (NativeLibraryPresenter.Item) -> Unit
++) : RecyclerView.Adapter<LauncherTileAdapter.Holder>() {
++
++    private val items = mutableListOf<NativeLibraryPresenter.Item>()
++
++    fun submit(list: List<NativeLibraryPresenter.Item>) {
++        items.clear()
++        items.addAll(list)
++        notifyDataSetChanged()
++    }
++
++    override fun getItemCount(): Int = items.size
++
++    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
++        val view = LayoutInflater.from(parent.context)
++            .inflate(R.layout.item_launcher_tile, parent, false)
++        return Holder(view)
++    }
++
++    override fun onBindViewHolder(holder: Holder, position: Int) {
++        val item = items[position]
++        holder.title.text = item.title
++        holder.subtitle.text = item.subtitle
++        holder.subtitle.isVisible = item.subtitle.isNotBlank()
++
++        holder.badge.text = item.badge
++        holder.badge.isVisible = item.badge.isNotBlank()
++
++        holder.note.text = item.note
++        holder.note.isVisible = item.note.isNotBlank()
++        // Красный только там, где человек ничего не исправит настройками:
++        // «нет ключей» лечится ключами. Сжатый образ - рабочая ситуация,
++        // поэтому он вторичного цвета, а не аварийного.
++        holder.note.setTextColor(
++            themedColor(
++                holder.note,
++                if (item.action == NativeLibraryPresenter.Action.KEYS) {
++                    com.google.android.material.R.attr.colorError
++                } else {
++                    com.google.android.material.R.attr.colorTertiary
++                }
++            )
++        )
++
++        holder.itemView.setOnClickListener { onClick(item) }
++        holder.itemView.setOnLongClickListener {
++            onLongClick(item)
++            true
++        }
++    }
++
++    /**
++     * Цвет из темы, без хардкода.
++     *
++     * Материаловские `colorError` и `colorTertiary` берутся из темы
++     * приложения: у светлой и тёмной темы они разные, а жёстко прописанный
++     * красный на тёмном фоне читался бы как ошибка вёрстки.
++     */
++    private fun themedColor(view: TextView, attr: Int): Int {
++        val value = TypedValue()
++        return if (view.context.theme.resolveAttribute(attr, value, true)) {
++            value.data
++        } else {
++            view.currentTextColor
++        }
++    }
++
++    class Holder(view: View) : RecyclerView.ViewHolder(view) {
++        val title: TextView = view.findViewById(R.id.text_tile_title)
++        val subtitle: TextView = view.findViewById(R.id.text_tile_subtitle)
++        val badge: TextView = view.findViewById(R.id.chip_tile_badge)
++        val note: TextView = view.findViewById(R.id.text_tile_note)
++    }
++}
 diff --git a/patch/android/assets/library.html b/patch/android/assets/library.html
 index 9553244..4dc70fc 100644
 --- a/patch/android/assets/library.html
@@ -1032,6 +1323,28 @@ index 9553244..4dc70fc 100644
  loadGames();
  loadStatus();
  applyPlugins();
+diff --git a/patch/android/fragments/GamePropertiesFragment.kt b/patch/android/fragments/GamePropertiesFragment.kt
+index 981661e..3f5048e 100644
+--- a/patch/android/fragments/GamePropertiesFragment.kt
++++ b/patch/android/fragments/GamePropertiesFragment.kt
+@@ -89,11 +89,13 @@ class GamePropertiesFragment : Fragment() {
+         homeViewModel.setStatusBarShadeVisibility(true)
+ 
+         binding.buttonBack.setOnClickListener {
+-            // Always return to the PWA home. A bare popBackStack() finishes
+-            // MainActivity when LivePanel is not on the back stack.
++            // Always return to the start screen - the native library now, not
++            // the old WebView panel. A bare popBackStack() finished
++            // MainActivity when the panel was not on the back stack; the same
++            // fallback is kept, pointing at whatever the graph says is home.
+             val nav = view.findNavController()
+-            if (!nav.popBackStack(R.id.livePanelFragment, false)) {
+-                runCatching { nav.navigate(R.id.livePanelFragment) }
++            if (!nav.popBackStack(R.id.nativeLauncherFragment, false)) {
++                runCatching { nav.navigate(R.id.nativeLauncherFragment) }
+             }
+         }
+ 
 diff --git a/patch/android/fragments/LivePanelFragment.kt b/patch/android/fragments/LivePanelFragment.kt
 index 993d3fc..a848c98 100644
 --- a/patch/android/fragments/LivePanelFragment.kt
@@ -1071,6 +1384,1279 @@ index 993d3fc..a848c98 100644
          @JavascriptInterface
          fun canOpen(path: String): Boolean = runCatching {
              Converter.canOpen(path)
+diff --git a/patch/android/fragments/ManualFragment.kt b/patch/android/fragments/ManualFragment.kt
+new file mode 100644
+index 0000000..5df4ccc
+--- /dev/null
++++ b/patch/android/fragments/ManualFragment.kt
+@@ -0,0 +1,191 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++package org.yuzu.yuzu_emu.fragments
++
++import android.os.Bundle
++import android.text.Editable
++import android.text.TextWatcher
++import android.view.LayoutInflater
++import android.view.View
++import android.view.ViewGroup
++import android.widget.LinearLayout
++import android.widget.TextView
++import androidx.core.view.ViewCompat
++import androidx.core.view.WindowInsetsCompat
++import androidx.core.view.isVisible
++import androidx.core.view.updatePadding
++import androidx.fragment.app.Fragment
++import androidx.navigation.fragment.findNavController
++import com.google.android.material.button.MaterialButton
++import com.google.android.material.snackbar.Snackbar
++import com.google.android.material.transition.MaterialSharedAxis
++import org.yuzu.yuzu_emu.R
++import org.yuzu.yuzu_emu.databinding.FragmentManualBinding
++import org.yuzu.yuzu_emu.utils.ConverterPicker
++import org.yuzu.yuzu_emu.utils.Manual
++
++/**
++ * Инструкция пользования.
++ *
++ * Содержание - в [Manual], здесь только вёрстка. Так текст можно
++ * проверить тестом (каждый раздел обязан ссылаться на существующий экран)
++ * и так его видно в `docs/GUIDE.md`: оба места пишутся из одного списка.
++ *
++ * Кнопки под разделами не декоративные: они ведут туда, о чём раздел.
++ * Человек читает «нажмите Ключи» и нажимает, а не ищет экран по памяти.
++ */
++class ManualFragment : Fragment() {
++    private var _binding: FragmentManualBinding? = null
++    private val binding get() = _binding!!
++
++    private lateinit var converter: ConverterPicker
++    private var query: String = ""
++
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        enterTransition = MaterialSharedAxis(MaterialSharedAxis.X, true)
++        returnTransition = MaterialSharedAxis(MaterialSharedAxis.X, false)
++
++        converter = ConverterPicker(
++            fragment = this,
++            onQueued = { count -> snack(getString(R.string.launcher_convert_queued, count)) },
++            onFailed = { snack(getString(R.string.launcher_convert_failed)) }
++        )
++    }
++
++    override fun onCreateView(
++        inflater: LayoutInflater,
++        container: ViewGroup?,
++        savedInstanceState: Bundle?
++    ): View {
++        _binding = FragmentManualBinding.inflate(inflater, container, false)
++        return binding.root
++    }
++
++    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
++        super.onViewCreated(view, savedInstanceState)
++
++        binding.toolbarManual.setNavigationOnClickListener {
++            runCatching { findNavController().popBackStack() }
++        }
++
++        binding.editManualSearch.addTextChangedListener(object : TextWatcher {
++            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
++            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
++            override fun afterTextChanged(s: Editable?) {
++                query = s?.toString().orEmpty()
++                render(Manual.search(query))
++            }
++        })
++
++        render(Manual.sections)
++        setInsets()
++    }
++
++    /** Перерисовать руководство: раздел за разделом, шаг за шагом. */
++    private fun render(sections: List<Manual.Section>) {
++        if (_binding == null) return
++        val container = binding.containerManual
++        container.removeAllViews()
++
++        if (sections.isEmpty()) {
++            // Пустой результат поиска говорит словами, а не пустым экраном:
++            // «ничего не нашлось» и «руководство не загрузилось» - разные
++            // вещи, и человеку важно понимать, какая из них случилась.
++            val row = layoutInflater.inflate(R.layout.item_manual_step, container, false)
++            row.findViewById<TextView>(R.id.text_manual_step_title)
++                .setText(R.string.manual_search_empty_title)
++            row.findViewById<TextView>(R.id.text_manual_step_text)
++                .setText(R.string.manual_search_empty)
++            container.addView(row)
++            return
++        }
++
++        sections.forEach { section ->
++            val card = layoutInflater.inflate(R.layout.card_manual_section, container, false)
++            card.findViewById<TextView>(R.id.text_manual_section_title).text = section.title
++            card.findViewById<TextView>(R.id.text_manual_section_intro).text = section.intro
++
++            val stepsContainer = card.findViewById<LinearLayout>(R.id.container_manual_steps)
++            section.steps.forEach { step ->
++                val row = layoutInflater.inflate(R.layout.item_manual_step, stepsContainer, false)
++                row.findViewById<TextView>(R.id.text_manual_step_title).text = step.title
++                row.findViewById<TextView>(R.id.text_manual_step_text).text = step.text
++                stepsContainer.addView(row)
++            }
++
++            val actionsContainer = card.findViewById<LinearLayout>(R.id.container_manual_actions)
++            actionsContainer.isVisible = section.actions.isNotEmpty()
++            section.actions.forEachIndexed { index, action ->
++                val button = layoutInflater
++                    .inflate(R.layout.button_manual_action, actionsContainer, false) as MaterialButton
++                button.text = action.label
++                button.setOnClickListener { go(action.go) }
++                val params = LinearLayout.LayoutParams(
++                    LinearLayout.LayoutParams.WRAP_CONTENT,
++                    LinearLayout.LayoutParams.WRAP_CONTENT
++                )
++                if (index > 0) params.marginStart = 8.px
++                actionsContainer.addView(button, params)
++            }
++
++            container.addView(card)
++        }
++    }
++
++    /**
++     * Кнопка раздела → экран.
++     *
++     * Отдельная функция, потому что разделы ссылаются на экраны по
++     * константе [Manual.Go], а не по `R.id`: так `Manual` остаётся чистым
++     * Kotlin и проверяется на хосте. Здесь эта константа и превращается в
++     * действие; если в навигации экрана нет, человек получает сообщение, а
++     * не вылет.
++     */
++    private fun go(target: Manual.Go) {
++        if (target == Manual.Go.CONVERT) {
++            converter.pick()
++            return
++        }
++        val action: Int = when (target) {
++            Manual.Go.FOLDERS -> R.id.action_global_symbiosisGameFoldersFragment
++            Manual.Go.KEYS -> R.id.action_global_keysFirmwareFragment
++            Manual.Go.TOOLS -> R.id.action_global_toolsFragment
++            Manual.Go.ENGINES -> R.id.action_global_enginesFragment
++            Manual.Go.FPS -> R.id.action_global_fpsTuningFragment
++            Manual.Go.DIAGNOSTICS -> R.id.action_global_diagnosticsFragment
++            Manual.Go.SETTINGS_GUIDE -> R.id.action_global_guideFragment
++            Manual.Go.PANEL -> R.id.action_global_livePanelFragment
++            Manual.Go.CONVERT -> 0
++        }
++        if (action == 0) return
++        runCatching { findNavController().navigate(action) }
++            .onFailure { snack(getString(R.string.manual_nav_failed)) }
++    }
++
++    private fun snack(message: String) {
++        if (_binding == null) return
++        Snackbar.make(binding.root, message, Snackbar.LENGTH_LONG).show()
++    }
++
++    private val Int.px: Int
++        get() = (this * resources.displayMetrics.density).toInt()
++
++    private fun setInsets() =
++        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _: View, insets: WindowInsetsCompat ->
++            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
++            val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
++            binding.scrollManual.updatePadding(
++                left = bars.left + cutout.left + 16.px,
++                right = bars.right + cutout.right + 16.px,
++                bottom = bars.bottom
++            )
++            insets
++        }
++
++    override fun onDestroyView() {
++        super.onDestroyView()
++        _binding = null
++    }
++}
+diff --git a/patch/android/fragments/NativeLauncherFragment.kt b/patch/android/fragments/NativeLauncherFragment.kt
+new file mode 100644
+index 0000000..20300d5
+--- /dev/null
++++ b/patch/android/fragments/NativeLauncherFragment.kt
+@@ -0,0 +1,367 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++package org.yuzu.yuzu_emu.fragments
++
++import android.net.Uri
++import android.os.Bundle
++import android.text.Editable
++import android.text.TextWatcher
++import android.view.LayoutInflater
++import android.view.View
++import android.view.ViewGroup
++import androidx.core.view.ViewCompat
++import androidx.core.view.WindowInsetsCompat
++import androidx.core.view.isVisible
++import androidx.core.view.updatePadding
++import androidx.fragment.app.Fragment
++import androidx.fragment.app.activityViewModels
++import androidx.navigation.fragment.findNavController
++import androidx.recyclerview.widget.LinearLayoutManager
++import com.google.android.material.chip.Chip
++import com.google.android.material.snackbar.Snackbar
++import com.google.android.material.transition.MaterialSharedAxis
++import org.yuzu.yuzu_emu.HomeNavigationDirections
++import org.yuzu.yuzu_emu.R
++import org.yuzu.yuzu_emu.adapters.LauncherTileAdapter
++import org.yuzu.yuzu_emu.databinding.FragmentNativeLauncherBinding
++import org.yuzu.yuzu_emu.model.Game
++import org.yuzu.yuzu_emu.model.GamesViewModel
++import org.yuzu.yuzu_emu.utils.ConverterPicker
++import org.yuzu.yuzu_emu.utils.GameHelper
++import org.yuzu.yuzu_emu.utils.NativeLibraryPresenter
++import org.yuzu.yuzu_emu.utils.collect
++
++/**
++ * Стартовый экран: библиотека, запуск, всё остальное - одной кнопкой.
++ *
++ * Раньше стартовым был WebView с `library.html`. Логика разбора файлов и
++ * решений «что предложить» жила в JavaScript, настройки - в Kotlin, вёрстка -
++ * в HTML-строке, и на вопрос «где что находится» ответить было нельзя даже
++ * по коду. Здесь экран не принимает ни одного решения: строки, пометки и
++ * действие собирает [NativeLibraryPresenter], которому это можно доказать
++ * тестом на хосте (`tests/NativeLibraryPresenterTest.kt`), а фрагмент только
++ * подставляет результат в адаптер.
++ *
++ * Экран показывает **все** файлы из выбранных папок, а не только
++ * запускаемые. Именно на этом ломалась старая библиотека: из сотен nsz, nsp
++ * и xci она показывала одну игру, потому что остальные молча отбрасывались
++ * как «невалидные». Теперь у каждого файла есть плитка, а у нерабочего -
++ * причина словами и действие.
++ */
++class NativeLauncherFragment : Fragment() {
++    private var _binding: FragmentNativeLauncherBinding? = null
++    private val binding get() = _binding!!
++
++    private val gamesViewModel: GamesViewModel by activityViewModels()
++
++    private lateinit var adapter: LauncherTileAdapter
++
++    /** Последний список из кэша или обхода; индексы совпадают с presenter. */
++    private var games: List<Game> = emptyList()
++
++    private var filter: String = NativeLibraryPresenter.FILTER_ALL
++    private var query: String = ""
++
++    /**
++     * Очередь распаковки. Создаётся в onCreate: регистрация результата
++     * обязана произойти до STARTED, иначе менеджер активности бросит
++     * исключение при первом нажатии.
++     */
++    private lateinit var converter: ConverterPicker
++
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        enterTransition = MaterialSharedAxis(MaterialSharedAxis.X, true)
++        returnTransition = MaterialSharedAxis(MaterialSharedAxis.X, false)
++
++        converter = ConverterPicker(
++            fragment = this,
++            onQueued = { count ->
++                if (_binding != null) {
++                    Snackbar.make(
++                        binding.root,
++                        getString(R.string.launcher_convert_queued, count),
++                        Snackbar.LENGTH_LONG
++                    ).show()
++                }
++            },
++            onFailed = {
++                if (_binding != null) {
++                    Snackbar.make(binding.root, R.string.launcher_convert_failed, Snackbar.LENGTH_LONG)
++                        .show()
++                }
++            }
++        )
++    }
++
++    override fun onCreateView(
++        inflater: LayoutInflater,
++        container: ViewGroup?,
++        savedInstanceState: Bundle?
++    ): View {
++        _binding = FragmentNativeLauncherBinding.inflate(inflater, container, false)
++        return binding.root
++    }
++
++    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
++        super.onViewCreated(view, savedInstanceState)
++
++        // Стартовый экран: стрелки «назад» нет, выходить из него - значит
++        // выходить из приложения.
++        binding.toolbarLauncher.title = getString(R.string.launcher_title)
++        binding.toolbarLauncher.subtitle = getString(R.string.launcher_subtitle)
++
++        adapter = LauncherTileAdapter(::onItemClick, ::onItemLongClick)
++        binding.listLauncher.apply {
++            layoutManager = LinearLayoutManager(requireContext())
++            adapter = this@NativeLauncherFragment.adapter
++            setHasFixedSize(false)
++        }
++
++        buildFilterChips()
++        bindActions()
++
++        binding.editLauncherSearch.addTextChangedListener(object : TextWatcher {
++            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
++            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) = Unit
++            override fun afterTextChanged(s: Editable?) {
++                query = s?.toString().orEmpty()
++                render()
++            }
++        })
++
++        binding.swipeLauncher.setOnRefreshListener {
++            gamesViewModel.reloadGames(false)
++        }
++
++        gamesViewModel.isReloading.collect(viewLifecycleOwner) {
++            binding.swipeLauncher.isRefreshing = it
++        }
++        gamesViewModel.games.collect(viewLifecycleOwner) {
++            games = it
++            render()
++        }
++
++        setInsets()
++    }
++
++    /**
++     * Кнопки сверху.
++     *
++     * Специально не в меню «три точки»: жалоба была именно на то, что
++     * нужное спрятано. Шесть кнопок в прокручиваемой строке видно сразу,
++     * и они же названы в руководстве.
++     */
++    private fun bindActions() {
++        binding.buttonLauncherRescan.setOnClickListener {
++            gamesViewModel.reloadGames(false)
++            Snackbar.make(binding.root, R.string.launcher_rescanning, Snackbar.LENGTH_SHORT).show()
++        }
++        binding.buttonLauncherFolders.setOnClickListener {
++            navigate(R.id.action_global_symbiosisGameFoldersFragment)
++        }
++        binding.buttonLauncherConvert.setOnClickListener {
++            converter.pick()
++        }
++        binding.buttonLauncherKeys.setOnClickListener {
++            navigate(R.id.action_global_keysFirmwareFragment)
++        }
++        binding.buttonLauncherTools.setOnClickListener {
++            navigate(R.id.action_global_toolsFragment)
++        }
++        binding.buttonLauncherHelp.setOnClickListener {
++            navigate(R.id.action_global_manualFragment)
++        }
++    }
++
++    private fun buildFilterChips() {
++        val chips = listOf(
++            NativeLibraryPresenter.FILTER_ALL to R.string.launcher_filter_all,
++            NativeLibraryPresenter.FILTER_RUNNABLE to R.string.launcher_filter_runnable,
++            NativeLibraryPresenter.FILTER_DEAD to R.string.launcher_filter_dead
++        )
++        binding.chipsLauncherFilters.removeAllViews()
++        chips.forEachIndexed { index, (id, label) ->
++            val chip = Chip(requireContext()).apply {
++                text = getString(label)
++                isCheckable = true
++                isChecked = index == 0
++                setOnClickListener {
++                    filter = id
++                    render()
++                }
++            }
++            binding.chipsLauncherFilters.addView(chip)
++        }
++    }
++
++    /** Перерисовать список по текущему состоянию: игры, причины, фильтр, поиск. */
++    private fun render() {
++        if (_binding == null) return
++
++        val rows = games.map { game ->
++            NativeLibraryPresenter.Row(
++                title = game.title,
++                path = game.path,
++                titleId = runCatching { game.programIdHex }.getOrDefault(""),
++                developer = game.developer,
++                fileName = fileNameOf(game.path)
++            )
++        }
++
++        val side = runCatching { GameHelper.sidecar }.getOrDefault(emptyList())
++            .map { s ->
++                NativeLibraryPresenter.Side(
++                    name = s.name,
++                    path = s.path,
++                    title = s.title,
++                    reason = s.reason,
++                    kind = s.kind
++                )
++            }
++
++        val stats = runCatching { GameHelper.scanStats }.getOrNull()
++        val model = NativeLibraryPresenter.build(
++            games = rows,
++            side = side,
++            updates = stats?.updates ?: 0,
++            dlc = stats?.dlc ?: 0,
++            search = query,
++            filter = filter
++        )
++
++        adapter.submit(model.items)
++
++        // Сводка и пустота говорят разное и не одновременно: когда строк
++        // нет, вместо «0 игр · 0 сжатых» показывается причина.
++        binding.textLauncherSummary.isVisible = model.items.isNotEmpty()
++        binding.textLauncherSummary.text = model.summary
++
++        val empty = model.items.isEmpty()
++        binding.textLauncherEmpty.isVisible = empty
++        if (empty) binding.textLauncherEmpty.text = model.emptyReason
++    }
++
++    private fun onItemClick(item: NativeLibraryPresenter.Item) {
++        when (item.action) {
++            NativeLibraryPresenter.Action.LAUNCH -> {
++                val game = games.getOrNull(item.gameIndex) ?: return
++                navigateToGame(game)
++            }
++            NativeLibraryPresenter.Action.CONVERT -> askConvert(item)
++            NativeLibraryPresenter.Action.KEYS -> explainUnreadable(item)
++            NativeLibraryPresenter.Action.EXPLAIN_SPLIT -> explainSplit(item)
++        }
++    }
++
++    private fun onItemLongClick(item: NativeLibraryPresenter.Item) {
++        val game = games.getOrNull(item.gameIndex) ?: return
++        runCatching {
++            findNavController().navigate(
++                HomeNavigationDirections.actionGlobalPerGamePropertiesFragment(game)
++            )
++        }.onFailure {
++            Snackbar.make(binding.root, R.string.launcher_properties_failed, Snackbar.LENGTH_LONG)
++                .show()
++        }
++    }
++
++    private fun navigate(destination: Int) {
++        runCatching { findNavController().navigate(destination) }
++            .onFailure {
++                Snackbar.make(binding.root, R.string.launcher_nav_failed, Snackbar.LENGTH_LONG)
++                    .show()
++            }
++    }
++
++    private fun navigateToGame(game: Game) {
++        runCatching {
++            findNavController().navigate(HomeNavigationDirections.actionGlobalEmulationActivity(game))
++        }.onFailure {
++            Snackbar.make(binding.root, R.string.launcher_launch_failed, Snackbar.LENGTH_LONG).show()
++        }
++    }
++
++    /**
++     * Сжатый образ: сначала объяснение, потом действие.
++     *
++     * Диалог, а не сразу распаковка: распаковка занимает столько же места,
++     * сколько сам образ, и на телефоне с 8 ГБ это решение, которое человек
++     * должен принять сам.
++     */
++    private fun askConvert(item: NativeLibraryPresenter.Item) {
++        val (title, text, _) = NativeLibraryPresenter.explain(
++            kind = "compressed",
++            name = item.title,
++            reason = "файл упакован"
++        )
++        MessageDialogFragment.newInstance(
++            requireActivity(),
++            titleString = title,
++            descriptionString = text,
++            positiveButtonTitleId = R.string.launcher_convert_start,
++            positiveAction = { converter.pick() },
++            showNegativeButton = true,
++            negativeButtonTitleId = android.R.string.cancel
++        ).show(childFragmentManager, MessageDialogFragment.TAG)
++    }
++
++    private fun explainUnreadable(item: NativeLibraryPresenter.Item) {
++        val (title, text, _) = NativeLibraryPresenter.explain(
++            kind = "unreadable",
++            name = item.title,
++            reason = item.subtitle
++        )
++        MessageDialogFragment.newInstance(
++            requireActivity(),
++            titleString = title,
++            descriptionString = text,
++            positiveButtonTitleId = R.string.launcher_open_keys,
++            positiveAction = { navigate(R.id.action_global_keysFirmwareFragment) },
++            showNegativeButton = true,
++            negativeButtonTitleId = android.R.string.cancel
++        ).show(childFragmentManager, MessageDialogFragment.TAG)
++    }
++
++    private fun explainSplit(item: NativeLibraryPresenter.Item) {
++        val (title, text, _) = NativeLibraryPresenter.explain(
++            kind = "split",
++            name = item.title,
++            reason = item.subtitle
++        )
++        MessageDialogFragment.newInstance(
++            requireActivity(),
++            titleString = title,
++            descriptionString = text
++        ).show(childFragmentManager, MessageDialogFragment.TAG)
++    }
++
++    private fun fileNameOf(path: String): String {
++        if (path.isBlank()) return ""
++        val segment = runCatching { Uri.parse(path).lastPathSegment }.getOrNull()
++        val decoded = runCatching { Uri.decode(segment ?: "") }.getOrDefault("")
++        return decoded.ifBlank { path.substringAfterLast('/') }
++    }
++
++    private fun setInsets() =
++        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _: View, insets: WindowInsetsCompat ->
++            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
++            val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
++            binding.listLauncher.updatePadding(
++                left = bars.left + cutout.left + 12.px,
++                right = bars.right + cutout.right + 12.px,
++                bottom = bars.bottom
++            )
++            insets
++        }
++
++    private val Int.px: Int
++        get() = (this * resources.displayMetrics.density).toInt()
++
++    override fun onDestroyView() {
++        super.onDestroyView()
++        binding.listLauncher.adapter = null
++        _binding = null
++    }
++}
+diff --git a/patch/android/fragments/ToolsFragment.kt b/patch/android/fragments/ToolsFragment.kt
+index 4cc4ad2..f5eca92 100644
+--- a/patch/android/fragments/ToolsFragment.kt
++++ b/patch/android/fragments/ToolsFragment.kt
+@@ -129,13 +129,30 @@ class ToolsFragment : Fragment() {
+                     { nav(R.id.action_global_guideFragment) }
+                 )
+             )
++            // Руководство стоит выше панели и выше справочника настроек:
++            // это единственный экран, который объясняет порядок действий
++            // целиком, а не одно понятие.
++            add(
++                HomeSetting(
++                    R.string.settings_manual,
++                    R.string.settings_manual_description,
++                    R.drawable.ic_info_outline,
++                    { nav(R.id.action_global_manualFragment) }
++                )
++            )
+             // Панель, содержимое которой обновляется без пересборки APK:
+             // страница живёт на GitHub Pages, данные читает локально через
+             // мост. Правка вёрстки видна сразу, скачивать 25 МБ не нужно.
++            //
++            // Названа «расширенной» не для красоты: после перевода
++            // библиотеки на нативную вёрстку всё, что нужно каждый день,
++            // есть на стартовом экране, а здесь остались редкие вещи -
++            // пространства, выбор ядра, тонкие переключатели. Пусть это
++            // будет видно из названия, а не выясняется опытным путём.
+             add(
+                 HomeSetting(
+-                    R.string.live_panel,
+-                    R.string.live_panel_description,
++                    R.string.live_panel_extended,
++                    R.string.live_panel_extended_description,
+                     R.drawable.ic_info_outline,
+                     { nav(R.id.action_global_livePanelFragment) }
+                 )
+diff --git a/patch/android/layout/button_manual_action.xml b/patch/android/layout/button_manual_action.xml
+new file mode 100644
+index 0000000..a344c0d
+--- /dev/null
++++ b/patch/android/layout/button_manual_action.xml
+@@ -0,0 +1,20 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++SPDX-License-Identifier: GPL-3.0-or-later
++
++A button under a manual section. Separate file because the style has to exist
++at inflation time: building a MaterialButton in code without a defStyleAttr
++produces an unstyled grey button that ignores the app theme, which is exactly
++how the old panel looked.
++-->
++<com.google.android.material.button.MaterialButton
++    xmlns:android="http://schemas.android.com/apk/res/android"
++    style="@style/Widget.Material3.Button.TonalButton"
++    android:id="@+id/button_manual_action"
++    android:layout_width="wrap_content"
++    android:layout_height="wrap_content"
++    android:minWidth="0dp"
++    android:minHeight="40dp"
++    android:insetTop="0dp"
++    android:insetBottom="0dp" />
+diff --git a/patch/android/layout/card_manual_section.xml b/patch/android/layout/card_manual_section.xml
+new file mode 100644
+index 0000000..ff4bdab
+--- /dev/null
++++ b/patch/android/layout/card_manual_section.xml
+@@ -0,0 +1,60 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++SPDX-License-Identifier: GPL-3.0-or-later
++
++One section of the manual: a title, a sentence about why it matters, then the
++steps. Cards rather than one long wall of text, because the question this
++screen answers is "where do I go next", and each section is one answer.
++-->
++<com.google.android.material.card.MaterialCardView
++    xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    android:id="@+id/card_manual_section"
++    style="?attr/materialCardViewOutlinedStyle"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:layout_marginVertical="6dp"
++    app:cardCornerRadius="16dp">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:orientation="vertical"
++        android:padding="16dp">
++
++        <TextView
++            android:id="@+id/text_manual_section_title"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:textAppearance="?attr/textAppearanceTitleMedium"
++            android:textColor="?attr/colorPrimary"
++            tools:text="С чего начать: три шага" />
++
++        <TextView
++            android:id="@+id/text_manual_section_intro"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="4dp"
++            android:textAppearance="?attr/textAppearanceBodyMedium"
++            tools:text="Порядок важен: пока нет ключей, ни один дамп не откроется." />
++
++        <LinearLayout
++            android:id="@+id/container_manual_steps"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="10dp"
++            android:orientation="vertical" />
++
++        <LinearLayout
++            android:id="@+id/container_manual_actions"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="10dp"
++            android:gravity="end"
++            android:orientation="horizontal" />
++
++    </LinearLayout>
++
++</com.google.android.material.card.MaterialCardView>
+diff --git a/patch/android/layout/fragment_manual.xml b/patch/android/layout/fragment_manual.xml
+new file mode 100644
+index 0000000..bae765f
+--- /dev/null
++++ b/patch/android/layout/fragment_manual.xml
+@@ -0,0 +1,84 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++SPDX-License-Identifier: GPL-3.0-or-later
++
++The manual: how to use the app, in the order a person needs it.
++
++It is a screen rather than a text file inside the APK because the text file
++was invisible on a phone. The sections come from utils/Manual.kt, the same
++list docs/GUIDE.md is written from, so the two cannot drift apart.
++-->
++<androidx.coordinatorlayout.widget.CoordinatorLayout
++    xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    android:id="@+id/coordinator_manual"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    android:background="?attr/colorSurface">
++
++    <com.google.android.material.appbar.AppBarLayout
++        android:id="@+id/appbar_manual"
++        style="@style/Widget.Eden.TransparentTopAppBarLayout"
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:fitsSystemWindows="true">
++
++        <com.google.android.material.appbar.MaterialToolbar
++            android:id="@+id/toolbar_manual"
++            style="@style/Widget.Eden.TransparentTopToolbar"
++            android:layout_width="match_parent"
++            android:layout_height="?attr/actionBarSize"
++            app:navigationIcon="@drawable/ic_back"
++            app:subtitle="@string/manual_subtitle"
++            app:title="@string/manual_title" />
++
++    </com.google.android.material.appbar.AppBarLayout>
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="match_parent"
++        android:orientation="vertical"
++        app:layout_behavior="@string/appbar_scrolling_view_behavior">
++
++        <com.google.android.material.textfield.TextInputLayout
++            android:id="@+id/layout_manual_search"
++            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:layout_marginHorizontal="16dp"
++            android:layout_marginTop="8dp"
++            android:hint="@string/manual_search_hint">
++
++            <com.google.android.material.textfield.TextInputEditText
++                android:id="@+id/edit_manual_search"
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:imeOptions="actionSearch"
++                android:inputType="text"
++                android:maxLines="1" />
++
++        </com.google.android.material.textfield.TextInputLayout>
++
++        <androidx.core.widget.NestedScrollView
++            android:id="@+id/scroll_manual"
++            android:layout_width="match_parent"
++            android:layout_height="0dp"
++            android:layout_weight="1"
++            android:clipToPadding="false"
++            android:paddingHorizontal="16dp"
++            android:paddingBottom="24dp">
++
++            <LinearLayout
++                android:id="@+id/container_manual"
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:orientation="vertical"
++                android:paddingTop="8dp" />
++
++        </androidx.core.widget.NestedScrollView>
++
++    </LinearLayout>
++
++</androidx.coordinatorlayout.widget.CoordinatorLayout>
+diff --git a/patch/android/layout/fragment_native_launcher.xml b/patch/android/layout/fragment_native_launcher.xml
+new file mode 100644
+index 0000000..c4dd5b5
+--- /dev/null
++++ b/patch/android/layout/fragment_native_launcher.xml
+@@ -0,0 +1,207 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++SPDX-License-Identifier: GPL-3.0-or-later
++
++Native launcher: the screen the app opens on.
++
++It replaces the WebView page that used to be the whole start screen. That
++page had half of its logic in JavaScript and the other half in Kotlin, and
++the result was exactly the complaint it earned: "I cannot tell where
++anything is". Here every row is a real Android view, every button is a real
++button, and the row layout comes from NativeLibraryPresenter, which the host
++test can check without an emulator.
++-->
++<androidx.coordinatorlayout.widget.CoordinatorLayout
++    xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    android:id="@+id/coordinator_launcher"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    android:background="?attr/colorSurface">
++
++    <com.google.android.material.appbar.AppBarLayout
++        android:id="@+id/appbar_launcher"
++        style="@style/Widget.Eden.TransparentTopAppBarLayout"
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:fitsSystemWindows="true">
++
++        <com.google.android.material.appbar.MaterialToolbar
++            android:id="@+id/toolbar_launcher"
++            style="@style/Widget.Eden.TransparentTopToolbar"
++            android:layout_width="match_parent"
++            android:layout_height="?attr/actionBarSize"
++            app:subtitle="@string/launcher_subtitle"
++            app:title="@string/launcher_title" />
++
++    </com.google.android.material.appbar.AppBarLayout>
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="match_parent"
++        android:orientation="vertical"
++        app:layout_behavior="@string/appbar_scrolling_view_behavior">
++
++        <!--
++        Actions, not a hamburger menu. The whole point of the rewrite was that
++        a person could not find things; a menu would hide them again.
++        -->
++        <HorizontalScrollView
++            android:id="@+id/scroll_launcher_actions"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:paddingHorizontal="16dp"
++            android:clipToPadding="false"
++            android:scrollbars="none">
++
++            <LinearLayout
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:orientation="horizontal">
++
++                <com.google.android.material.button.MaterialButton
++                    android:id="@+id/button_launcher_rescan"
++                    style="@style/Widget.Material3.Button.TonalButton"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:layout_marginEnd="8dp"
++                    android:minWidth="0dp"
++                    android:text="@string/launcher_rescan" />
++
++                <com.google.android.material.button.MaterialButton
++                    android:id="@+id/button_launcher_folders"
++                    style="@style/Widget.Material3.Button.TonalButton"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:layout_marginEnd="8dp"
++                    android:minWidth="0dp"
++                    android:text="@string/launcher_action_folders" />
++
++                <com.google.android.material.button.MaterialButton
++                    android:id="@+id/button_launcher_convert"
++                    style="@style/Widget.Material3.Button.TonalButton"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:layout_marginEnd="8dp"
++                    android:minWidth="0dp"
++                    android:text="@string/launcher_action_convert" />
++
++                <com.google.android.material.button.MaterialButton
++                    android:id="@+id/button_launcher_keys"
++                    style="@style/Widget.Material3.Button.TonalButton"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:layout_marginEnd="8dp"
++                    android:minWidth="0dp"
++                    android:text="@string/launcher_action_keys" />
++
++                <com.google.android.material.button.MaterialButton
++                    android:id="@+id/button_launcher_tools"
++                    style="@style/Widget.Material3.Button.TonalButton"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:layout_marginEnd="8dp"
++                    android:minWidth="0dp"
++                    android:text="@string/launcher_action_tools" />
++
++                <com.google.android.material.button.MaterialButton
++                    android:id="@+id/button_launcher_help"
++                    style="@style/Widget.Material3.Button.TonalButton"
++                    android:layout_width="wrap_content"
++                    android:layout_height="wrap_content"
++                    android:minWidth="0dp"
++                    android:text="@string/launcher_action_help" />
++
++            </LinearLayout>
++
++        </HorizontalScrollView>
++
++        <com.google.android.material.textfield.TextInputLayout
++            android:id="@+id/layout_launcher_search"
++            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:layout_marginHorizontal="16dp"
++            android:layout_marginTop="8dp"
++            android:hint="@string/launcher_search_hint">
++
++            <com.google.android.material.textfield.TextInputEditText
++                android:id="@+id/edit_launcher_search"
++                android:layout_width="match_parent"
++                android:layout_height="wrap_content"
++                android:imeOptions="actionSearch"
++                android:inputType="text"
++                android:maxLines="1" />
++
++        </com.google.android.material.textfield.TextInputLayout>
++
++        <HorizontalScrollView
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="8dp"
++            android:paddingHorizontal="16dp"
++            android:clipToPadding="false"
++            android:scrollbars="none">
++
++            <com.google.android.material.chip.ChipGroup
++                android:id="@+id/chips_launcher_filters"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                app:selectionRequired="true"
++                app:singleLine="true"
++                app:singleSelection="true" />
++
++        </HorizontalScrollView>
++
++        <com.google.android.material.textview.MaterialTextView
++            android:id="@+id/text_launcher_summary"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:paddingHorizontal="20dp"
++            android:paddingTop="10dp"
++            android:paddingBottom="4dp"
++            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
++            android:textColor="?attr/colorPrimary"
++            tools:text="12 игр · 3 обновления · 40 сжатых → Конвертер" />
++
++        <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
++            android:id="@+id/swipe_launcher"
++            android:layout_width="match_parent"
++            android:layout_height="0dp"
++            android:layout_weight="1">
++
++            <FrameLayout
++                android:layout_width="match_parent"
++                android:layout_height="match_parent">
++
++                <androidx.recyclerview.widget.RecyclerView
++                    android:id="@+id/list_launcher"
++                    android:layout_width="match_parent"
++                    android:layout_height="match_parent"
++                    android:clipToPadding="false"
++                    android:paddingHorizontal="12dp"
++                    android:paddingBottom="24dp"
++                    android:scrollbars="vertical" />
++
++                <com.google.android.material.textview.MaterialTextView
++                    android:id="@+id/text_launcher_empty"
++                    android:layout_width="match_parent"
++                    android:layout_height="wrap_content"
++                    android:layout_margin="28dp"
++                    android:layout_gravity="center"
++                    android:gravity="center"
++                    android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
++                    android:textColor="?attr/colorOnSurfaceVariant"
++                    android:visibility="gone"
++                    tools:text="Папка не выбрана или пуста: «Папки» → добавить папку с играми."
++                    tools:visibility="visible" />
++
++            </FrameLayout>
++
++        </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
++
++    </LinearLayout>
++
++</androidx.coordinatorlayout.widget.CoordinatorLayout>
+diff --git a/patch/android/layout/item_launcher_tile.xml b/patch/android/layout/item_launcher_tile.xml
+new file mode 100644
+index 0000000..b042e0a
+--- /dev/null
++++ b/patch/android/layout/item_launcher_tile.xml
+@@ -0,0 +1,93 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++SPDX-License-Identifier: GPL-3.0-or-later
++
++One row in the library. A row, not a tile: the entry for a file that will not
++launch has to say WHY in words, and a word does not fit under a square cover.
++
++The note on the right is the difference between "the app is broken" and "this
++file is compressed" - so it is never hidden, and it is coloured when it means
++something is wrong.
++-->
++<com.google.android.material.card.MaterialCardView
++    xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    android:id="@+id/card_launcher_tile"
++    style="?attr/materialCardViewOutlinedStyle"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:layout_marginVertical="5dp"
++    android:clickable="true"
++    android:focusable="true"
++    android:longClickable="true"
++    app:cardCornerRadius="16dp">
++
++    <LinearLayout
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:orientation="vertical"
++        android:padding="14dp">
++
++        <LinearLayout
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:orientation="horizontal"
++            android:gravity="center_vertical">
++
++            <LinearLayout
++                android:layout_width="0dp"
++                android:layout_height="wrap_content"
++                android:layout_weight="1"
++                android:orientation="vertical">
++
++                <TextView
++                    android:id="@+id/text_tile_title"
++                    android:layout_width="match_parent"
++                    android:layout_height="wrap_content"
++                    android:maxLines="2"
++                    android:ellipsize="end"
++                    android:textAppearance="?attr/textAppearanceTitleMedium"
++                    tools:text="Metroid Dread" />
++
++                <TextView
++                    android:id="@+id/text_tile_subtitle"
++                    android:layout_width="match_parent"
++                    android:layout_height="wrap_content"
++                    android:layout_marginTop="2dp"
++                    android:maxLines="2"
++                    android:ellipsize="end"
++                    android:textAppearance="?attr/textAppearanceBodySmall"
++                    android:textColor="?attr/colorOnSurfaceVariant"
++                    tools:text="Nintendo · 01001F5010DCC000" />
++
++            </LinearLayout>
++
++            <com.google.android.material.chip.Chip
++                android:id="@+id/chip_tile_badge"
++                style="@style/Widget.Material3.Chip.Assist"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:layout_marginStart="10dp"
++                android:clickable="false"
++                android:focusable="false"
++                android:textAppearance="?attr/textAppearanceLabelSmall"
++                tools:text="nsp" />
++
++        </LinearLayout>
++
++        <TextView
++            android:id="@+id/text_tile_note"
++            android:layout_width="match_parent"
++            android:layout_height="wrap_content"
++            android:layout_marginTop="6dp"
++            android:textAppearance="?attr/textAppearanceLabelLarge"
++            android:textColor="?attr/colorTertiary"
++            android:visibility="gone"
++            tools:text="сжатый"
++            tools:visibility="visible" />
++
++    </LinearLayout>
++
++</com.google.android.material.card.MaterialCardView>
+diff --git a/patch/android/layout/item_manual_step.xml b/patch/android/layout/item_manual_step.xml
+new file mode 100644
+index 0000000..08e7dd7
+--- /dev/null
++++ b/patch/android/layout/item_manual_step.xml
+@@ -0,0 +1,32 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!--
++SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++SPDX-License-Identifier: GPL-3.0-or-later
++
++One step inside a manual section.
++-->
++<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:tools="http://schemas.android.com/tools"
++    android:id="@+id/row_manual_step"
++    android:layout_width="match_parent"
++    android:layout_height="wrap_content"
++    android:layout_marginTop="8dp"
++    android:orientation="vertical">
++
++    <TextView
++        android:id="@+id/text_manual_step_title"
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:textAppearance="?attr/textAppearanceTitleSmall"
++        tools:text="1. Ключи и прошивка" />
++
++    <TextView
++        android:id="@+id/text_manual_step_text"
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:layout_marginTop="2dp"
++        android:textAppearance="?attr/textAppearanceBodySmall"
++        android:textColor="?attr/colorOnSurfaceVariant"
++        tools:text="«Ключи» → prod.keys, затем файлы прошивки." />
++
++</LinearLayout>
+diff --git a/patch/android/navigation/home_navigation.xml b/patch/android/navigation/home_navigation.xml
+index 0f03aa8..bc6b3b8 100644
+--- a/patch/android/navigation/home_navigation.xml
++++ b/patch/android/navigation/home_navigation.xml
+@@ -3,7 +3,7 @@
+     xmlns:app="http://schemas.android.com/apk/res-auto"
+     xmlns:tools="http://schemas.android.com/tools"
+     android:id="@+id/home_navigation"
+-    app:startDestination="@id/livePanelFragment">
++    app:startDestination="@id/nativeLauncherFragment">
+ 
+     <fragment
+         android:id="@+id/gamesFragment"
+@@ -100,6 +100,26 @@
+         android:name="org.yuzu.yuzu_emu.fragments.InstallableFragment"
+         android:label="InstallableFragment" />
+     <!-- Symbiosis screens -->
++    <!--
++    Стартовый экран - нативная библиотека. Раньше им был WebView с панелью,
++    и именно из-за этого нельзя было понять, где что находится: половина
++    интерфейса жила в HTML, половина - в Kotlin.
++    -->
++    <fragment
++        android:id="@+id/nativeLauncherFragment"
++        android:name="org.yuzu.yuzu_emu.fragments.NativeLauncherFragment"
++        android:label="NativeLauncherFragment" />
++    <action
++        android:id="@+id/action_global_nativeLauncherFragment"
++        app:destination="@id/nativeLauncherFragment"
++        app:launchSingleTop="true" />
++    <fragment
++        android:id="@+id/manualFragment"
++        android:name="org.yuzu.yuzu_emu.fragments.ManualFragment"
++        android:label="ManualFragment" />
++    <action
++        android:id="@+id/action_global_manualFragment"
++        app:destination="@id/manualFragment" />
+     <fragment
+         android:id="@+id/fpsTuningFragment"
+         android:name="org.yuzu.yuzu_emu.fragments.FpsTuningFragment"
+@@ -229,7 +249,7 @@
+     <action
+         android:id="@+id/action_global_perGamePropertiesFragment"
+         app:destination="@id/perGamePropertiesFragment"
+-        app:popUpTo="@id/livePanelFragment"
++        app:popUpTo="@id/nativeLauncherFragment"
+         app:popUpToInclusive="false" />
+     <fragment
+         android:id="@+id/gameInfoFragment"
+diff --git a/patch/android/proguard-symbiosis.pro b/patch/android/proguard-symbiosis.pro
+index 2e68fab..0144c0a 100644
+--- a/patch/android/proguard-symbiosis.pro
++++ b/patch/android/proguard-symbiosis.pro
+@@ -26,7 +26,19 @@
+ -keep class org.yuzu.yuzu_emu.activities.KenjiPlayerActivity { *; }
+ 
+ # Screens the navigation graph creates by name.
++#
++# The launcher and the manual matter most: the launcher is the start
++# destination, so a renamed class means the app opens on
++# ClassNotFoundException instead of a library, and the manual is the screen
++# that explains where everything is.
+ -keep class org.yuzu.yuzu_emu.fragments.EnginesFragment { *; }
++-keep class org.yuzu.yuzu_emu.fragments.NativeLauncherFragment { *; }
++-keep class org.yuzu.yuzu_emu.fragments.ManualFragment { *; }
++# The tiles' decisions and the manual text, reached only from those screens.
++-keep class org.yuzu.yuzu_emu.utils.NativeLibraryPresenter { *; }
++-keep class org.yuzu.yuzu_emu.utils.NativeLibraryPresenter$* { *; }
++-keep class org.yuzu.yuzu_emu.utils.Manual { *; }
++-keep class org.yuzu.yuzu_emu.utils.Manual$* { *; }
+ 
+ # The bridge, belt and braces. The native side resolves
+ # Java_org_yuzu_yuzu_1emu_utils_KenjiBridge_* by symbol name, so the class
+diff --git a/patch/android/ui/main/MainActivity.kt b/patch/android/ui/main/MainActivity.kt
+index 199f655..1ddad08 100644
+--- a/patch/android/ui/main/MainActivity.kt
++++ b/patch/android/ui/main/MainActivity.kt
+@@ -311,7 +311,10 @@ class MainActivity : AppCompatActivity(), ThemeProvider {
+     }
+ 
+     fun finishSetup(navController: NavController) {
+-        navController.navigate(R.id.action_firstTimeSetupFragment_to_gamesFragment)
++        // Мастер первого запуска убран; если его вернут, выход из него ведёт
++        // на нативный лаунчер, а не на прежний экран игр: домашний экран
++        // теперь один, и он же библиотека.
++        navController.navigate(R.id.action_global_nativeLauncherFragment)
+     }
+ 
+     private fun setUpNavigation(navController: NavController) {
+diff --git a/patch/android/utils/ConverterPicker.kt b/patch/android/utils/ConverterPicker.kt
+new file mode 100644
+index 0000000..731bc75
+--- /dev/null
++++ b/patch/android/utils/ConverterPicker.kt
+@@ -0,0 +1,39 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++package org.yuzu.yuzu_emu.utils
++
++import androidx.activity.result.ActivityResultLauncher
++import androidx.activity.result.contract.ActivityResultContracts
++import androidx.fragment.app.Fragment
++
++/**
++ * Кнопка «Конвертер»: выбрать файл и поставить его в очередь распаковки.
++ *
++ * Один и тот же поток нужен на двух экранах - в библиотеке и в руководстве, -
++ * и раньше он был только внутри WebView-панели. Здесь он собран один раз:
++ * адаптеру не надо знать ни про SAF, ни про то, как выглядит отказ.
++ *
++ * Регистрация результата обязана произойти до того, как фрагмент станет
++ * STARTED, иначе ActivityResultRegistry бросит исключение. Поэтому объект
++ * создаётся в `onCreate`, а не по первому нажатию.
++ */
++class ConverterPicker(
++    private val fragment: Fragment,
++    private val onQueued: (Int) -> Unit,
++    private val onFailed: () -> Unit
++) {
++    private val picker: ActivityResultLauncher<Array<String>> =
++        fragment.registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
++            if (uris.isNullOrEmpty()) return@registerForActivityResult
++            val queued = runCatching {
++                Converter.enqueue(fragment.requireContext().applicationContext, uris)
++            }.isSuccess
++            if (queued) onQueued(uris.size) else onFailed()
++        }
++
++    /** Открыть системный выбор файлов. */
++    fun pick() {
++        runCatching { picker.launch(arrayOf("*/*")) }.onFailure { onFailed() }
++    }
++}
 diff --git a/patch/android/utils/GameFolderScanner.kt b/patch/android/utils/GameFolderScanner.kt
 index fd699af..82f383c 100644
 --- a/patch/android/utils/GameFolderScanner.kt
@@ -1967,6 +3553,652 @@ index 97a5546..ac772f0 100644
      }
  
      fun memoryJson(): String = runCatching {
+diff --git a/patch/android/utils/Manual.kt b/patch/android/utils/Manual.kt
+new file mode 100644
+index 0000000..84fdeb6
+--- /dev/null
++++ b/patch/android/utils/Manual.kt
+@@ -0,0 +1,268 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++package org.yuzu.yuzu_emu.utils
++
++import java.util.Locale
++
++/**
++ * Инструкция пользования: что где лежит и в каком порядке нажимать.
++ *
++ * Экран библиотеки отвечал на вопрос «что у меня есть», но не на вопрос
++ * «а куда идти дальше». Настройки были в четырёх местах - на главном,
++ * в «Инструментах», за шестерёнкой и в старой панели, - и человек,
++ * который первый раз запускает эмулятор, не мог понять, где ключи, где
++ * папки и почему половина файлов помечена «сжатый».
++ *
++ * Тексты лежат здесь, а не в вёрстке, по двум причинам: их видно в
++ * `docs/GUIDE.md` (тот же порядок разделов) и их можно проверить на хосте
++ * тестом - `tests/NativeLibraryPresenterTest.kt` следит, чтобы каждый
++ * раздел ссылался на экран, который действительно есть в навигации.
++ *
++ * Этот файл намеренно без Android: он собирается обычным kotlinc.
++ */
++object Manual {
++
++    /**
++     * Куда ведёт кнопка раздела.
++     *
++     * Идентификаторы строковых констант, а не `R.id.*`: `R` живёт в
++     * сгенерированном коде и недоступен хост-тесту. Экран
++     * ([org.yuzu.yuzu_emu.fragments.ManualFragment]) переводит [Go] в
++     * действие навигации.
++     */
++    enum class Go {
++        FOLDERS,
++        KEYS,
++        CONVERT,
++        TOOLS,
++        ENGINES,
++        FPS,
++        DIAGNOSTICS,
++        SETTINGS_GUIDE,
++        PANEL
++    }
++
++    /** Один шаг: короткий заголовок и одно-два предложения под ним. */
++    data class Step(val title: String, val text: String)
++
++    /** Кнопка под разделом. */
++    data class Action(val label: String, val go: Go)
++
++    /** Раздел руководства. */
++    data class Section(
++        val id: String,
++        val title: String,
++        val intro: String,
++        val steps: List<Step>,
++        val actions: List<Action> = emptyList()
++    )
++
++    /**
++     * Версия текста.
++     *
++     * Поднимается, когда руководство меняется по существу: так по номеру в
++     * шапке видно, что человек читает новую инструкцию, а не ту, что была
++     * в APK полугодовой давности.
++     */
++    const val VERSION = 1
++
++    /** Все разделы в том порядке, в каком их читают. */
++    val sections: List<Section> = listOf(
++        Section(
++            id = "start",
++            title = "С чего начать: три шага",
++            intro = "Порядок важен. Пока нет ключей, ни один дамп не откроется, " +
++                "и пустой список будет выглядеть как «папка не та», хотя дело не в ней.",
++            steps = listOf(
++                Step(
++                    "1. Ключи и прошивка",
++                    "«Ключи» → prod.keys, затем файлы прошивки. Без них заголовок " +
++                        "файла зашифрован: приложение видит файл, но не знает, что это " +
++                        "за игра, и помечает его «нет ключей»."
++                ),
++                Step(
++                    "2. Папка с играми",
++                    "«Папки» → «Добавить папку». Выберите папку, где лежат NSP, XCI, " +
++                        "NCA или сжатые NSZ. Папок может быть несколько, вложенность " +
++                        "читается."
++                ),
++                Step(
++                    "3. Нажать игру",
++                    "Вернитесь на этот экран: игры уже в списке. Нажатие запускает игру, " +
++                        "долгое нажатие открывает её свойства - масштаб, драйвер, сейвы."
++                )
++            ),
++            actions = listOf(Action("Открыть ключи", Go.KEYS), Action("Открыть папки", Go.FOLDERS))
++        ),
++        Section(
++            id = "library",
++            title = "Экран библиотеки: что означают значки",
++            intro = "Список показывает все файлы в выбранных папках, а не только те, " +
++                "что запускаются. Поэтому «игр нет» больше не значит «файлы не нашлись».",
++            steps = listOf(
++                Step(
++                    "Строка сверху",
++                    "Например: «12 игр · 3 обновления · 40 сжатых → Конвертер · 2 не читаются». " +
++                        "Это счёт по всем папкам сразу, без фильтров."
++                ),
++                Step(
++                    "Метка на плитке",
++                    "nsp, xci, nca, nro - формат файла. Обновления и DLC стоят рядом " +
++                        "со своей игрой отдельными плитками: так видно, что установлено."
++                ),
++                Step(
++                    "Пометка справа",
++                    "«сжатый» - образ упакован (NSZ/XCZ/NCZ) и сначала распаковывается. " +
++                        "«нет ключей» - заголовок не расшифровался. «часть» - разрезанный " +
++                        "образ, нужны все части."
++                ),
++                Step(
++                    "Фильтры и поиск",
++                    "«Запускается» прячет всё, что не откроется. Поиск ищет по названию, " +
++                        "Title ID и имени файла."
++                ),
++                Step(
++                    "Долгое нажатие",
++                    "Свойства конкретной игры: настройки только для неё, сейвы, удаление. " +
++                        "Остальные игры это не затрагивает."
++                )
++            )
++        ),
++        Section(
++            id = "dead",
++            title = "Файл виден, но не запускается",
++            intro = "Нажмите такую плитку - приложение скажет причину словами и предложит " +
++                "действие. Причин три, и решения у них разные.",
++            steps = listOf(
++                Step(
++                    "Сжатый NSZ / XCZ / NCZ",
++                    "«Конвертер» → выбрать файл → подождать. Распаковка идёт на телефоне и " +
++                        "занимает столько же места, сколько сам образ: освободите его заранее. " +
++                        "Готовый NSP появится в папке конвертера и сразу в библиотеке."
++                ),
++                Step(
++                    "Часть разрезанного образа (.nsp.00, .xci.01)",
++                    "Ядро открывает только целый файл. Положите все части в одну папку - " +
++                        "библиотека склеит их в одну игру и уберёт лишние плитки."
++                ),
++                Step(
++                    "Нет ключей",
++                    "«Ключи» → prod.keys, затем прошивка. После установки нажмите " +
++                        "«Искать игры»: заголовки расшифруются, и плитки станут запускаемыми. " +
++                        "Файлы при этом никуда не переносятся."
++                )
++            ),
++            actions = listOf(Action("Открыть конвертер", Go.CONVERT), Action("Открыть ключи", Go.KEYS))
++        ),
++        Section(
++            id = "map",
++            title = "Где что лежит",
++            intro = "Все экраны по порядку. Главное - здесь; остальное открывается кнопками " +
++                "сверху или из «Инструментов».",
++            steps = listOf(
++                Step("Библиотека (этот экран)", "Стартовый экран: игры, поиск, запуск."),
++                Step("Папки", "Откуда берутся игры: добавить или убрать папку и посмотреть, что в ней лежит."),
++                Step("Конвертер", "Распаковка сжатых образов; здесь же лежат готовые NSP и очередь заданий."),
++                Step("Ключи", "prod.keys и файлы прошивки консоли. Без них заголовки дампов не расшифровываются."),
++                Step(
++                    "Инструменты",
++                    "Всё остальное: подбор FPS, диагностика, движки, утилиты ROM, сейвы, " +
++                        "лаунчеры, справочник настроек."
++                ),
++                Step("Руководство (этот экран)", "Инструкция, которую вы читаете; сверху - поиск по ней."),
++                Step(
++                    "Расширенная панель",
++                    "Старая универсальная панель: пространства, выбор ядра, тонкие " +
++                        "переключатели. Нужна редко и для обычной игры не требуется."
++                )
++            ),
++            actions = listOf(Action("Открыть инструменты", Go.TOOLS))
++        ),
++        Section(
++            id = "speed",
++            title = "Если медленно",
++            intro = "На Mali-G57 с 8 ГБ помогает не «включить всё», а изменить три вещи.",
++            steps = listOf(
++                Step(
++                    "Масштаб 0.75x",
++                    "Настройки → Графика → Разрешение. Заметная часть работы GPU уходит на " +
++                        "пиксели, которых на экране телефона не видно."
++                ),
++                Step(
++                    "Подбор FPS",
++                    "«Инструменты» → «Подбор FPS»: ставит настройки под это устройство, " +
++                        "а не «максимум качества»."
++                ),
++                Step(
++                    "Диагностика",
++                    "Показывает, какие настройки доехали до драйвера, а какие Mali молча " +
++                        "выбросил. «Включено, но не работает» здесь - обычное дело."
++                )
++            ),
++            actions = listOf(Action("Подбор FPS", Go.FPS), Action("Диагностика", Go.DIAGNOSTICS))
++        ),
++        Section(
++            id = "data",
++            title = "Сейвы, папка данных, перенос",
++            intro = "Сейвы живут не рядом с играми, а в папке данных приложения.",
++            steps = listOf(
++                Step(
++                    "Где сейвы",
++                    "Папка данных (по умолчанию - внутренняя память приложения) → saves. " +
++                        "Свойства игры показывают «сейв 128 КБ», если он уже есть."
++                ),
++                Step(
++                    "Сменить папку данных",
++                    "«Инструменты» → «Утилиты» → сменить папку данных, затем перезапустить " +
++                        "приложение. Папку с играми это не затрагивает."
++                ),
++                Step(
++                    "Перенос на другой телефон",
++                    "Скопируйте папку данных целиком: там сейвы, шейдеры и настройки игр. " +
++                        "Игры можно не копировать - достаточно заново указать папку."
++                )
++            )
++        ),
++        Section(
++            id = "trouble",
++            title = "Если что-то не так: порядок проверки",
++            intro = "Проверяйте сверху вниз, пока не найдётся причина. Каждый пункт - один экран.",
++            steps = listOf(
++                Step("Список пуст", "«Папки» → добавить папку. Если папка уже есть - потяните список вниз: это повторный обход."),
++                Step("Игра не запускается", "Нажмите плитку: причина будет в диалоге. Чаще всего - нет ключей или образ сжатый."),
++                Step("Чёрный экран или вылет", "«Инструменты» → «Диагностика» → отчёт о запуске: видно, что ядро приняло, а что выбросило."),
++                Step(
++                    "Одна игра идёт, другая нет",
++                    "«Инструменты» → «Движки»: переключите Eden на Kenji-NX. Игра, которая " +
++                        "не идёт на одном, иногда идёт на другом."
++                )
++            ),
++            actions = listOf(Action("Диагностика", Go.DIAGNOSTICS), Action("Движки", Go.ENGINES))
++        )
++    )
++
++    /**
++     * Поиск по руководству.
++     *
++     * Ищет и по заголовкам, и по тексту шагов: человек помнит слово
++     * «конвертер» или «сжатый», а не название раздела.
++     */
++    fun search(query: String): List<Section> {
++        val q = query.trim().lowercase(Locale.ROOT)
++        if (q.isEmpty()) return sections
++        return sections.filter { section ->
++            section.title.lowercase(Locale.ROOT).contains(q) ||
++                section.steps.any {
++                    it.title.lowercase(Locale.ROOT).contains(q) ||
++                        it.text.lowercase(Locale.ROOT).contains(q)
++                }
++        }
++    }
++
++    /** Заголовки разделов в порядке чтения - для оглавления и тестов. */
++    fun titles(): List<String> = sections.map { it.title }
++
++    /** Все экраны, на которые ссылаются кнопки руководства. */
++    fun referencedScreens(): Set<Go> = sections.flatMap { s -> s.actions.map { it.go } }.toSet()
++}
+diff --git a/patch/android/utils/NativeLibraryPresenter.kt b/patch/android/utils/NativeLibraryPresenter.kt
+new file mode 100644
+index 0000000..ae1ab57
+--- /dev/null
++++ b/patch/android/utils/NativeLibraryPresenter.kt
+@@ -0,0 +1,276 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++package org.yuzu.yuzu_emu.utils
++
++import java.util.Locale
++
++/**
++ * Что показывает нативный лаунчер и что делает нажатие.
++ *
++ * Раньше эту работу делала страница в WebView (`library.html`): она решала,
++ * что попадёт в карусель, какие плитки нерабочие, какое действие предложить
++ * и как это назвать. Из-за этого половина интерфейса была в JavaScript, а
++ * половина — в Kotlin, и понять, где что лежит, было нельзя.
++ *
++ * Здесь всё, что можно решить без Android: набор элементов, их порядок,
++ * бейджи, действия и строка сводки. Экран ([org.yuzu.yuzu_emu.fragments.
++ * NativeLauncherFragment]) только рисует то, что вернул этот класс, поэтому
++ * логику можно проверить на хосте (`tests/NativeLibraryPresenterTest.kt`),
++ * не собирая APK.
++ */
++object NativeLibraryPresenter {
++
++    /** Что делает нажатие на элемент. */
++    enum class Action {
++        /** Игра запускается. */
++        LAUNCH,
++        /** Сжатый образ: предложить распаковку. */
++        CONVERT,
++        /** Заголовок не прочитан: нужны ключи и прошивка. */
++        KEYS,
++        /** Часть разрезанного образа: склеивается с соседями. */
++        EXPLAIN_SPLIT
++    }
++
++    /** Строка библиотеки. */
++    data class Row(
++        val title: String,
++        val path: String,
++        /** `0100…` в hex, пустая строка если нет. */
++        val titleId: String = "",
++        val developer: String = "",
++        val fileName: String = "",
++        val hasSave: Boolean = false,
++        val saveSize: String = ""
++    )
++
++    /** Файл, который виден, но не запускается. */
++    data class Side(
++        val name: String,
++        val path: String,
++        val title: String,
++        val reason: String,
++        /** `compressed`, `unreadable`, `split`. */
++        val kind: String
++    )
++
++    /** Один элемент на экране. */
++    data class Item(
++        val title: String,
++        /** Строка под названием: разработчик, Title ID или причина. */
++        val subtitle: String,
++        /** Короткая метка на плитке: `nsp`, `xci`, `DLC`. */
++        val badge: String,
++        /** Пометка справа: «обновление», «сжатый», «нет ключей». */
++        val note: String,
++        val path: String,
++        val action: Action,
++        val runnable: Boolean,
++        /** Индекс в исходном списке игр, -1 для файлов из [Side]. */
++        val gameIndex: Int = -1
++    )
++
++    /** Что нарисовать. */
++    data class Model(
++        val items: List<Item>,
++        /** Строка над списком: «742 файла · 120 игр · 400 сжатых». */
++        val summary: String,
++        /** То же число словами, когда игр нет: это самый частый вопрос. */
++        val emptyReason: String,
++        val games: Int,
++        val updates: Int,
++        val dlc: Int,
++        val compressed: Int,
++        val unreadable: Int,
++        /** Индекс выбранной плитки в карусели. */
++        val selected: Int = 0
++    )
++
++    /**
++     * Собирает экран.
++     *
++     * Порядок намеренный: сначала то, что запускается, потом обновления и
++     * DLC, и только затем файлы, которые библиотека видит, но открыть не
++     * может. Так «одна игра» из старых жалоб не прячется за четырьмястами
++     * сжатыми образами, но и не исчезает: сжатые идут следом и объяснены.
++     */
++    fun build(
++        games: List<Row>,
++        side: List<Side> = emptyList(),
++        updates: Int = 0,
++        dlc: Int = 0,
++        search: String = "",
++        filter: String = FILTER_ALL
++    ): Model {
++        val query = search.trim().lowercase(Locale.ROOT)
++
++        val gameItems = games.mapIndexed { index, row ->
++            Item(
++                title = row.title.ifBlank { row.fileName.substringBeforeLast('.') },
++                subtitle = subtitleOf(row),
++                badge = extensionOf(row.fileName.ifEmpty { row.path }),
++                note = "",
++                path = row.path,
++                action = Action.LAUNCH,
++                runnable = true,
++                gameIndex = index
++            )
++        }
++
++        val sideItems = side.map { s ->
++            Item(
++                title = s.title.ifBlank { s.name.substringBeforeLast('.') },
++                subtitle = s.reason,
++                badge = extensionOf(s.name.ifEmpty { s.path }),
++                note = when (s.kind) {
++                    "compressed" -> "сжатый"
++                    "split" -> "часть"
++                    "unreadable" -> "нет ключей"
++                    else -> ""
++                },
++                path = s.path,
++                action = when (s.kind) {
++                    "compressed" -> Action.CONVERT
++                    "split" -> Action.EXPLAIN_SPLIT
++                    else -> Action.KEYS
++                },
++                runnable = false,
++                gameIndex = -1
++            )
++        }
++
++        val all = (gameItems + sideItems)
++            .filter { matches(it, query) }
++            .filter { matchesFilter(it, filter) }
++
++        val compressed = side.count { it.kind == "compressed" }
++        val unreadable = side.count { it.kind == "unreadable" }
++        val split = side.count { it.kind == "split" }
++        val gamesCount = games.size
++
++        return Model(
++            items = all,
++            summary = summaryLine(gamesCount, updates, dlc, compressed, unreadable + split),
++            emptyReason = emptyReason(gamesCount, compressed, unreadable + split, games.size + side.size),
++            games = gamesCount,
++            updates = updates,
++            dlc = dlc,
++            compressed = compressed,
++            unreadable = unreadable + split
++        )
++    }
++
++    const val FILTER_ALL = "all"
++    const val FILTER_RUNNABLE = "runnable"
++    const val FILTER_DEAD = "dead"
++
++    private fun matches(item: Item, query: String): Boolean {
++        if (query.isEmpty()) return true
++        return item.title.lowercase(Locale.ROOT).contains(query) ||
++            item.subtitle.lowercase(Locale.ROOT).contains(query)
++    }
++
++    private fun matchesFilter(item: Item, filter: String): Boolean = when (filter) {
++        FILTER_RUNNABLE -> item.runnable
++        FILTER_DEAD -> !item.runnable
++        else -> true
++    }
++
++    private fun subtitleOf(row: Row): String {
++        val bits = mutableListOf<String>()
++        if (row.developer.isNotBlank()) bits.add(row.developer)
++        if (row.titleId.isNotBlank()) bits.add(row.titleId)
++        if (row.hasSave) bits.add("сейв " + row.saveSize.ifBlank { "есть" })
++        return bits.joinToString(" · ")
++    }
++
++    /**
++     * `Game [0100…][v0].nsp` → `nsp`; пусто, если расширения нет.
++     *
++     * Хвост разрезанного образа отрезается: у `Big.nsp.00` на плитке должно
++     * стоять `nsp`, а не `00` — иначе бейдж ничего не говорит о файле.
++     */
++    fun extensionOf(name: String): String {
++        val base = LibraryIndex.withoutSplitSuffix(name.substringAfterLast('/')).first
++        val ext = base.substringAfterLast('.', "").lowercase(Locale.ROOT)
++        return if (ext.length in 2..4 && ext.all { it.isLetterOrDigit() }) ext else ""
++    }
++
++    /**
++     * Строка сводки.
++     *
++     * Считает слова правильно: «1 игра», «2 игры», «5 игр». Раньше панель
++     * писала «1 сжатых» и «3 файлов», и это читалось как ошибка.
++     */
++    fun summaryLine(games: Int, updates: Int, dlc: Int, compressed: Int, broken: Int): String {
++        val parts = mutableListOf<String>()
++        parts.add("$games ${plural(games, "игра", "игры", "игр")}")
++        if (updates > 0) parts.add("$updates ${plural(updates, "обновление", "обновления", "обновлений")}")
++        if (dlc > 0) parts.add("$dlc DLC")
++        if (compressed > 0) {
++            parts.add("$compressed ${plural(compressed, "сжатый", "сжатых", "сжатых")} → Конвертер")
++        }
++        if (broken > 0) parts.add("$broken ${plural(broken, "не читается", "не читаются", "не читаются")}")
++        return parts.joinToString(" · ")
++    }
++
++    /** Почему список пуст — словами, а не «нет игр». */
++    fun emptyReason(games: Int, compressed: Int, broken: Int, files: Int): String = when {
++        files == 0 -> "Папка не выбрана или пуста: «Папки» → добавить папку с играми."
++        games > 0 -> "Ничего не найдено по этому фильтру."
++        compressed > 0 && broken > 0 ->
++            "Игр нет: $compressed ${plural(compressed, "файл", "файла", "файлов")} сжаты, " +
++                "$broken не читаются. Сжатые распаковывает Конвертер, для остальных нужны ключи."
++        compressed > 0 ->
++            "Игр нет: $compressed ${plural(compressed, "файл сжат", "файла сжаты", "файлов сжаты")}. " +
++                "Откройте «Конвертер» → «Распаковать»."
++        broken > 0 ->
++            "Игр нет: $broken ${plural(broken, "файл не читается", "файла не читаются", "файлов не читаются")}. " +
++                "Нужны ключи консоли (prod.keys) и прошивка."
++        else -> "Игр нет — в выбранных папках лежат только посторонние файлы."
++    }
++
++    /** Русское склонение: 1 игра, 2 игры, 5 игр. */
++    fun plural(n: Int, one: String, few: String, many: String): String {
++        val mod100 = Math.abs(n) % 100
++        val mod10 = Math.abs(n) % 10
++        return when {
++            mod100 in 11..14 -> many
++            mod10 == 1 -> one
++            mod10 in 2..4 -> few
++            else -> many
++        }
++    }
++
++    /**
++     * Что написать в диалоге для файла, который не запускается.
++     *
++     * Тексты здесь, а не в экране, чтобы их можно было проверить тестом и
++     * чтобы в них не просочилось имя класса: пользователь должен читать
++     * причину, а не `java.lang.IllegalStateException`.
++     */
++    fun explain(kind: String, name: String, reason: String = ""): Triple<String, String, String> =
++        when (kind) {
++            "compressed" -> Triple(
++                name,
++                "Это сжатый образ ($reason). Ядро открывает только nsp/xci/nca, " +
++                    "поэтому файл сначала распаковывается. Распаковка идёт на телефоне " +
++                    "и занимает столько же места, сколько сам образ.",
++                "Распаковать"
++            )
++            "split" -> Triple(
++                name,
++                "Это часть разрезанного образа. Запускается только целый файл: " +
++                    "положите все части рядом, и библиотека увидит одну игру.",
++                "Понятно"
++            )
++            else -> Triple(
++                name,
++                "Файл на месте, но ядро не прочитало заголовок. Так бывает без ключей " +
++                    "консоли (prod.keys) и прошивки: содержимое дампа зашифровано, и " +
++                    "без них не запустится ни один nsp, xci или nca.",
++                "Где ключи"
++            )
++        }
++}
+diff --git a/patch/android/values/strings-en.xml b/patch/android/values/strings-en.xml
+index 1285646..fb53b61 100644
+--- a/patch/android/values/strings-en.xml
++++ b/patch/android/values/strings-en.xml
+@@ -2116,4 +2116,40 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+     <string name="engine_choice_description">Eden or Kenji-NX. A game that stalls on one sometimes runs on the other.</string>
+     <string name="live_panel">Panel</string>
+     <string name="live_panel_description">Status, folders and files. Updates itself, no reinstall</string>
++
++    <!-- Native launcher: the start screen of the library -->
++    <string name="launcher_title">Symbiosis</string>
++    <string name="launcher_subtitle">Game library</string>
++    <string name="launcher_rescan">Rescan</string>
++    <string name="launcher_rescanning">Scanning folders: the list updates itself</string>
++    <string name="launcher_action_folders">Folders</string>
++    <string name="launcher_action_convert">Converter</string>
++    <string name="launcher_action_keys">Keys</string>
++    <string name="launcher_action_tools">Tools</string>
++    <string name="launcher_action_help">Guide</string>
++    <string name="launcher_search_hint">Search: title, title ID or file name</string>
++    <string name="launcher_filter_all">All files</string>
++    <string name="launcher_filter_runnable">Runnable</string>
++    <string name="launcher_filter_dead">Not runnable</string>
++    <string name="launcher_convert_start">Choose a file</string>
++    <string name="launcher_convert_queued">Queued for conversion: %1$d. Keep the app open while it unpacks.</string>
++    <string name="launcher_convert_failed">Could not queue the file for conversion</string>
++    <string name="launcher_open_keys">Where are the keys</string>
++    <string name="launcher_launch_failed">The game did not open. The reason is in Tools -> Diagnostics.</string>
++    <string name="launcher_nav_failed">The screen did not open: try again</string>
++    <string name="launcher_properties_failed">Game properties did not open</string>
++
++    <!-- User manual -->
++    <string name="manual_title">Guide</string>
++    <string name="manual_subtitle">How to use it and where everything is</string>
++    <string name="manual_search_hint">Search the guide</string>
++    <string name="manual_search_empty_title">Nothing found</string>
++    <string name="manual_search_empty">Try a single word: converter, keys, folders, saves, compressed.</string>
++    <string name="manual_nav_failed">The screen did not open: try again</string>
++    <string name="settings_manual">User manual</string>
++    <string name="settings_manual_description">Step by step: keys, folders, launching, what to do with compressed files</string>
++
++    <string name="live_panel_extended">Advanced panel</string>
++    <string name="live_panel_extended_description">The rare things in one place: spaces, engine choice, fine-grained toggles</string>
++
+ </resources>
+diff --git a/patch/android/values/strings-ru.xml b/patch/android/values/strings-ru.xml
+index 4d3e0b3..85c363b 100644
+--- a/patch/android/values/strings-ru.xml
++++ b/patch/android/values/strings-ru.xml
+@@ -1449,4 +1449,40 @@
+     <string name="engine_choice_description">Eden или Kenji-NX. Игра, которая не идёт на одном, иногда идёт на другом.</string>
+     <string name="live_panel">Панель</string>
+     <string name="live_panel_description">Состояние, папки и файлы. Обновляется сама, без переустановки</string>
++
++    <!-- Нативный лаунчер: стартовый экран библиотеки -->
++    <string name="launcher_title">Symbiosis</string>
++    <string name="launcher_subtitle">Библиотека игр</string>
++    <string name="launcher_rescan">Искать игры</string>
++    <string name="launcher_rescanning">Обход папок: список обновится сам</string>
++    <string name="launcher_action_folders">Папки</string>
++    <string name="launcher_action_convert">Конвертер</string>
++    <string name="launcher_action_keys">Ключи</string>
++    <string name="launcher_action_tools">Инструменты</string>
++    <string name="launcher_action_help">Руководство</string>
++    <string name="launcher_search_hint">Поиск: название, Title ID или имя файла</string>
++    <string name="launcher_filter_all">Все файлы</string>
++    <string name="launcher_filter_runnable">Запускается</string>
++    <string name="launcher_filter_dead">Не запускается</string>
++    <string name="launcher_convert_start">Выбрать файл</string>
++    <string name="launcher_convert_queued">В очереди конвертера: %1$d. Не закрывайте приложение, пока идёт распаковка.</string>
++    <string name="launcher_convert_failed">Не удалось поставить файл в очередь конвертера</string>
++    <string name="launcher_open_keys">Где ключи</string>
++    <string name="launcher_launch_failed">Игра не открылась. Причина — в «Инструменты» → «Диагностика».</string>
++    <string name="launcher_nav_failed">Экран не открылся: попробуйте ещё раз</string>
++    <string name="launcher_properties_failed">Свойства игры не открылись</string>
++
++    <!-- Руководство пользования -->
++    <string name="manual_title">Руководство</string>
++    <string name="manual_subtitle">Как пользоваться и где что лежит</string>
++    <string name="manual_search_hint">Поиск по руководству</string>
++    <string name="manual_search_empty_title">Ничего не нашлось</string>
++    <string name="manual_search_empty">Попробуйте одно слово: конвертер, ключи, папки, сейвы, сжатый.</string>
++    <string name="manual_nav_failed">Экран не открылся: попробуйте ещё раз</string>
++    <string name="settings_manual">Руководство пользования</string>
++    <string name="settings_manual_description">Пошагово: ключи, папки, запуск, что делать со сжатыми файлами</string>
++
++    <string name="live_panel_extended">Расширенная панель</string>
++    <string name="live_panel_extended_description">Всё редкое в одном месте: пространства, выбор ядра, тонкие переключатели</string>
++
+ </resources>
 diff --git a/tests/LibraryIndexTest.kt b/tests/LibraryIndexTest.kt
 new file mode 100644
 index 0000000..1420806
@@ -2176,11 +4408,298 @@ index 0000000..1420806
 +        kotlin.system.exitProcess(1)
 +    }
 +}
+diff --git a/tests/NativeLibraryPresenterTest.kt b/tests/NativeLibraryPresenterTest.kt
+new file mode 100644
+index 0000000..08fdcf1
+--- /dev/null
++++ b/tests/NativeLibraryPresenterTest.kt
+@@ -0,0 +1,281 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++//
++// Нативный лаунчер: та же логика, что у страницы в WebView, но без WebView.
++//
++// Проверяется [NativeLibraryPresenter] - он и есть вся логика: порядок,
++// бейджи, действия, строка сводки, склонения, тексты диалогов. Экран только
++// рисует. Поэтому тест зовёт настоящий презентер, а не модель.
++//
++// Run: kotlinc tests/NativeLibraryPresenterTest.kt \
++//        patch/android/utils/NativeLibraryPresenter.kt patch/android/utils/LibraryIndex.kt \
++//        -include-runtime -d /tmp/np.jar && java -jar /tmp/np.jar
++
++import java.io.File
++import org.yuzu.yuzu_emu.utils.LibraryIndex
++import org.yuzu.yuzu_emu.utils.Manual
++import org.yuzu.yuzu_emu.utils.NativeLibraryPresenter
++import org.yuzu.yuzu_emu.utils.NativeLibraryPresenter.Action
++
++private var passed = 0
++private var failed = 0
++private val failures = mutableListOf<String>()
++
++private fun check(name: String, ok: Boolean, detail: String = "") {
++    if (ok) {
++        passed++
++        println("  ok    $name${if (detail.isEmpty()) "" else "   [$detail]"}")
++    } else {
++        failed++
++        failures += name
++        println("  FAIL  $name${if (detail.isEmpty()) "" else "   [$detail]"}")
++    }
++}
++
++private fun eq(name: String, actual: Any?, expected: Any?) =
++    check(name, actual == expected, "получено $actual, ожидалось $expected")
++
++fun main() {
++    println("NativeLibraryPresenter — что показывает нативный лаунчер")
++
++    val games = listOf(
++        NativeLibraryPresenter.Row(
++            title = "Sonic Mania", path = "content://a/Sonic Mania [01004E300BD5C000][v0].nsp",
++            titleId = "01004E300BD5C000", developer = "Sega",
++            fileName = "Sonic Mania [01004E300BD5C000][v0].nsp"
++        ),
++        NativeLibraryPresenter.Row(
++            title = "Hollow Knight", path = "content://a/Hollow Knight [0100633007D48000][v0].nsp",
++            titleId = "0100633007D48000", fileName = "Hollow Knight [0100633007D48000][v0].nsp",
++            hasSave = true, saveSize = "3 МБ"
++        ),
++        NativeLibraryPresenter.Row(
++            title = "Zelda", path = "content://a/Zelda [01007EF00011E000][v0].xci",
++            titleId = "01007EF00011E000", fileName = "Zelda [01007EF00011E000][v0].xci"
++        )
++    )
++    val side = listOf(
++        NativeLibraryPresenter.Side(
++            "Hollow Knight [0100633007D48000][v0].nsz", "content://a/x.nsz", "Hollow Knight",
++            "сжатый образ", "compressed"
++        ),
++        NativeLibraryPresenter.Side(
++            "Big [0100AAAAAAAAA000][v0].nsp.00", "content://a/y.00", "Big",
++            "часть разрезанного образа", "split"
++        ),
++        NativeLibraryPresenter.Side(
++            "Metroid Dread [010093801237C000][v0].xci", "content://a/z.xci", "Metroid Dread",
++            "ядро не прочитало заголовок", "unreadable"
++        )
++    )
++
++    val model = NativeLibraryPresenter.build(games, side, updates = 2, dlc = 1)
++
++    // ── порядок и действия ──────────────────────────────────────────────
++    eq("элементов", model.items.size, 6)
++    eq("первым идёт игра", model.items[0].title, "Sonic Mania")
++    eq("игра запускается", model.items[0].action, Action.LAUNCH)
++    eq("сжатый идёт после игр", model.items[3].action, Action.CONVERT)
++    eq("сжатый помечен", model.items[3].note, "сжатый")
++    eq("часть — объяснение, а не распаковка", model.items[4].action, Action.EXPLAIN_SPLIT)
++    eq("непрочитанный просит ключи", model.items[5].action, Action.KEYS)
++    eq("непрочитанный помечен", model.items[5].note, "нет ключей")
++    eq("причина стала подписью", model.items[5].subtitle, "ядро не прочитало заголовок")
++
++    // ── бейджи: расширение, а не иероглиф ───────────────────────────────
++    eq("бейдж nsp", model.items[0].badge, "nsp")
++    eq("бейдж xci", model.items[5].badge, "xci")
++    eq("бейдж nsz", model.items[3].badge, "nsz")
++    eq("у .nsp.00 бейдж от имени без хвоста", model.items[4].badge, "nsp")
++    eq("мусорный бейдж пустой", NativeLibraryPresenter.extensionOf("main"), "")
++    eq("main без расширения не даёт бейдж", NativeLibraryPresenter.extensionOf("файл."), "")
++
++    // ── сводка и склонения ──────────────────────────────────────────────
++    eq(
++        "сводка",
++        model.summary,
++        "3 игры · 2 обновления · 1 DLC · 1 сжатый → Конвертер · 2 не читаются"
++    )
++    eq("1 игра", NativeLibraryPresenter.summaryLine(1, 0, 0, 0, 0), "1 игра")
++    eq("2 игры", NativeLibraryPresenter.summaryLine(2, 0, 0, 0, 0), "2 игры")
++    eq("5 игр", NativeLibraryPresenter.summaryLine(5, 0, 0, 0, 0), "5 игр")
++    eq("11 игр", NativeLibraryPresenter.summaryLine(11, 0, 0, 0, 0), "11 игр")
++    eq("21 игра", NativeLibraryPresenter.summaryLine(21, 0, 0, 0, 0), "21 игра")
++    eq(
++        "сжатых не «1 сжатых»",
++        NativeLibraryPresenter.summaryLine(0, 0, 0, 1, 0),
++        "0 игр · 1 сжатый → Конвертер"
++    )
++
++    // ── пустой экран говорит почему ─────────────────────────────────────
++    val onlyCompressed = NativeLibraryPresenter.build(
++        emptyList(),
++        listOf(
++            NativeLibraryPresenter.Side("a.nsz", "p1", "A", "сжатый образ", "compressed"),
++            NativeLibraryPresenter.Side("b.nsz", "p2", "B", "сжатый образ", "compressed"),
++            NativeLibraryPresenter.Side("c.mp4", "p3", "C", "не образ", "other")
++        )
++    )
++    check(
++        "пустой экран объясняет распаковку",
++        onlyCompressed.emptyReason.contains("2 файла сжаты"),
++        onlyCompressed.emptyReason
++    )
++    check(
++        "пустой экран зовёт Конвертер",
++        onlyCompressed.emptyReason.contains("Конвертер")
++    )
++    val noFolder = NativeLibraryPresenter.build(emptyList(), emptyList())
++    check("совсем пусто — про папку", noFolder.emptyReason.contains("Папка не выбрана"), noFolder.emptyReason)
++    check("совсем пусто не врёт про сжатые", !noFolder.emptyReason.contains("сжаты"))
++
++    // ── поиск и фильтры ─────────────────────────────────────────────────
++    val search = NativeLibraryPresenter.build(games, side, search = "zelda")
++    eq("поиск по названию", search.items.size, 1)
++    eq("поиск нашёл Zelda", search.items[0].title, "Zelda")
++    val searchByTid = NativeLibraryPresenter.build(games, side, search = "01004e30")
++    eq("поиск по Title ID не зависит от регистра", searchByTid.items.size, 1)
++    val dead = NativeLibraryPresenter.build(games, side, filter = NativeLibraryPresenter.FILTER_DEAD)
++    eq("фильтр «не запускается»", dead.items.size, 3)
++    check("в нём только нерабочие", dead.items.none { it.runnable })
++    val runnable = NativeLibraryPresenter.build(games, side, filter = NativeLibraryPresenter.FILTER_RUNNABLE)
++    eq("фильтр «запускается»", runnable.items.size, 3)
++    check("в нём только рабочие", runnable.items.all { it.runnable })
++
++    // ── тексты диалогов: причина, а не имя класса ───────────────────────
++    val (title, body, button) = NativeLibraryPresenter.explain("compressed", "Hollow Knight", "сжатый образ")
++    eq("диалог: заголовок", title, "Hollow Knight")
++    check("диалог: про распаковку", body.contains("распаковывается"), body)
++    eq("диалог: кнопка", button, "Распаковать")
++    val keys = NativeLibraryPresenter.explain("unreadable", "Metroid Dread", "ядро не прочитало заголовок")
++    check("диалог ключей зовёт prod.keys", keys.second.contains("prod.keys"), keys.second)
++    check(
++        "ни одного имени класса в текстах",
++        listOf(body, keys.second).none { it.contains("Exception") || it.contains(".kt") }
++    )
++    val split = NativeLibraryPresenter.explain("split", "Big", "часть разрезанного образа")
++    check("диалог части про целый файл", split.second.contains("целый файл"), split.second)
++
++    // ── связь с правилом «что такое игра» ───────────────────────────────
++    val real = LibraryIndex.classify("Hollow Knight [0100633007D48000][v0].nsz")
++    eq("NSZ остаётся сжатым", real.kind, LibraryIndex.Kind.COMPRESSED)
++    eq("и его бейдж — nsz", NativeLibraryPresenter.extensionOf(real.name), "nsz")
++
++    // ── исходники рядом: экран обязан звать презентер ───────────────────
++    val root = File(".").absoluteFile
++    val fragment = File(root, "patch/android/fragments/NativeLauncherFragment.kt")
++    if (File(root, "patch/android").isDirectory) {
++        check("экран существует", fragment.isFile)
++        if (fragment.isFile) {
++            val src = fragment.readText()
++            check("экран не решает сам, что запускать", src.contains("NativeLibraryPresenter.build"))
++            check("экран берёт причины из презентера", src.contains("NativeLibraryPresenter.explain"))
++            check(
++                "в экране нет WebView",
++                !src.contains("android.webkit.WebView") && !src.contains("WebViewFragment")
++            )
++        }
++        val nav = File(root, "patch/android/navigation/home_navigation.xml")
++        if (nav.isFile) {
++            val xml = nav.readText()
++            check("лаунчер есть в навигации", xml.contains("nativeLauncherFragment"))
++            check(
++                "стартовый экран — нативный лаунчер",
++                Regex("startDestination=\"@id/nativeLauncherFragment\"").containsMatchIn(xml)
++            )
++        }
++    } else {
++        println("  note  дерево patch/ рядом не найдено — проверка дрейфа пропущена")
++    }
++
++    // ── руководство: разделы и экраны, на которые они ссылаются ─────────
++    check("в руководстве есть раздел «с чего начать»", Manual.sections.first().id == "start")
++    check("разделов не меньше шести", Manual.sections.size >= 6, "${Manual.sections.size}")
++    check("у каждого раздела есть шаги", Manual.sections.all { it.steps.isNotEmpty() })
++    check(
++        "ни один раздел не пустой",
++        Manual.sections.all { it.title.isNotBlank() && it.intro.isNotBlank() }
++    )
++    check(
++        "каждый шаг объясняет, а не только называет",
++        Manual.sections.flatMap { it.steps }.all { it.text.length >= 30 },
++        Manual.sections.flatMap { it.steps }.firstOrNull { it.text.length < 30 }?.title ?: ""
++    )
++    check(
++        "поиск находит конвертер",
++        Manual.search("конвертер").isNotEmpty(),
++        "${Manual.search("конвертер").size}"
++    )
++    check("поиск находит ключи", Manual.search("prod.keys").isNotEmpty())
++    check("поиск не находит чепуху", Manual.search("zzzzz").isEmpty())
++    check("пустой запрос отдаёт всё", Manual.search("  ").size == Manual.sections.size)
++    check(
++        "кнопки руководства ведут на разные экраны",
++        Manual.referencedScreens().size >= 6,
++        "${Manual.referencedScreens()}"
++    )
++    check(
++        "руководство ссылается на конвертер, ключи и папки",
++        Manual.referencedScreens().containsAll(
++            listOf(Manual.Go.CONVERT, Manual.Go.KEYS, Manual.Go.FOLDERS)
++        )
++    )
++    check(
++        "в текстах руководства нет имён классов",
++        Manual.sections.none { s ->
++            s.steps.any { it.text.contains("Exception") || it.text.contains(".kt") }
++        }
++    )
++
++    if (File(root, "patch/android").isDirectory) {
++        val manualScreen = File(root, "patch/android/fragments/ManualFragment.kt")
++        check("экран руководства существует", manualScreen.isFile)
++        if (manualScreen.isFile) {
++            val src = manualScreen.readText()
++            check("руководство берёт текст из Manual", src.contains("Manual.sections"))
++            check("руководство умеет искать", src.contains("Manual.search"))
++            check(
++                "в руководстве нет WebView",
++                !src.contains("android.webkit.WebView") && !src.contains("WebViewFragment")
++            )
++        }
++        val navXml = File(root, "patch/android/navigation/home_navigation.xml")
++        if (navXml.isFile) {
++            val xml = navXml.readText()
++            check("руководство есть в навигации", xml.contains("manualFragment"))
++            check(
++                "на руководство есть глобальное действие",
++                xml.contains("action_global_manualFragment")
++            )
++            // Каждая кнопка раздела обязана вести на существующий экран.
++            val actions = listOf(
++                "action_global_symbiosisGameFoldersFragment",
++                "action_global_keysFirmwareFragment",
++                "action_global_toolsFragment",
++                "action_global_enginesFragment",
++                "action_global_fpsTuningFragment",
++                "action_global_diagnosticsFragment",
++                "action_global_guideFragment",
++                "action_global_livePanelFragment"
++            )
++            val missing = actions.filterNot { xml.contains(it) }
++            check("все экраны руководства есть в навигации", missing.isEmpty(), missing.joinToString())
++        }
++        val tools = File(root, "patch/android/fragments/ToolsFragment.kt")
++        if (tools.isFile) {
++            val src = tools.readText()
++            check("в инструментах есть руководство", src.contains("action_global_manualFragment"))
++            check(
++                "старая панель названа расширенной",
++                src.contains("live_panel_extended")
++            )
++        }
++    }
++
++    println()
++    println("passed=$passed failed=$failed")
++    if (failed > 0) {
++        println("failing: ${failures.joinToString(", ")}")
++        kotlin.system.exitProcess(1)
++    }
++}
 diff --git a/tools/run_tests.sh b/tools/run_tests.sh
-index c52fdb1..373cf40 100644
+index c52fdb1..c109272 100644
 --- a/tools/run_tests.sh
 +++ b/tools/run_tests.sh
-@@ -104,10 +104,35 @@ done
+@@ -104,10 +104,41 @@ done
  
  # Kotlin tests, when a compiler is available.
  if command -v kotlinc >/dev/null 2>&1; then
@@ -2194,6 +4713,12 @@ index c52fdb1..373cf40 100644
 +  kt_deps_for() {
 +    case "$1" in
 +      LibraryIndexTest) echo "$HERE/patch/android/utils/LibraryIndex.kt" ;;
++      # The native launcher keeps its decisions in a presenter and its text in
++      # Manual, both plain Kotlin. A test that calls them should compile against
++      # them rather than against a hand-written copy of the same logic.
++      NativeLibraryPresenterTest) echo "$HERE/patch/android/utils/LibraryIndex.kt \
++        $HERE/patch/android/utils/NativeLibraryPresenter.kt \
++        $HERE/patch/android/utils/Manual.kt" ;;
 +      *)                echo "" ;;
 +    esac
 +  }
