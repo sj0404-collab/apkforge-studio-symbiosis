@@ -1,8 +1,8 @@
 diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
-index d614e4d..a8dd809 100644
+index d614e4d..a5a1f75 100644
 --- a/.github/workflows/build.yml
 +++ b/.github/workflows/build.yml
-@@ -268,7 +268,12 @@ jobs:
+@@ -268,7 +268,13 @@ jobs:
            esac
  
            if [ "$MINIFIED" = 0 ]; then
@@ -12,10 +12,34 @@ index d614e4d..a8dd809 100644
 +            # лежащий в patch/, но не в дереве сборки, даёт зелёную сборку с
 +            # прежним интерфейсом - ровно это и проверяем.
 +            for sym in restoreGameDirs rememberGameDirs hasActionableButton \
-+                       NativeLauncherFragment ManualFragment NativeLibraryPresenter; do
++                       NativeLauncherFragment ManualFragment NativeLibraryPresenter \
++                       EnginesFragment EngineHybrid EngineStore; do
                if strings classes*.dex | grep -q "$sym"; then echo "  ok   $sym in dex"
                else echo "  MISSING $sym"; fail=1; fi
              done
+@@ -276,6 +282,22 @@ jobs:
+             echo "  (release build: Kotlin names are minified, skipping that check)"
+           fi
+ 
++          # Гибрид: экран «Два ядра» и строки к нему. Класс может быть в dex,
++          # а строка не доехать — экран тогда покажет пустую подпись. Имена
++          # ресурсов лежат в resources.arsc, а не в res/*.xml: там они уже
++          # числа, поэтому ищем в таблице ресурсов, в обеих кодировках пула.
++          python3 - "$GITHUB_WORKSPACE/$APK" <<'STPY' || fail=1
++          import sys, zipfile
++          z = zipfile.ZipFile(sys.argv[1])
++          arsc = z.read("resources.arsc")
++          for key in ("engine_choice", "launcher_core_kenji", "launcher_properties"):
++              if key.encode() in arsc or key.encode("utf-16-le") in arsc:
++                  print("  ok   string %s is in the resource table" % key)
++              else:
++                  print("  MISSING string %s" % key)
++                  sys.exit(1)
++          STPY
++
+           NM=$(find "$ANDROID_HOME/ndk" -name llvm-nm | head -1)
+           n=$("$NM" -D lib/arm64-v8a/libyuzu-android.so | grep -c NativeSymbiosis || true)
+           echo "  JNI symbols exported: $n"
 diff --git a/README.md b/README.md
 index 3a98d4c..fe2a2d5 100644
 --- a/README.md
@@ -3773,7 +3797,7 @@ index 0000000..9986ee8
 +}
 diff --git a/patch/android/utils/EngineStore.kt b/patch/android/utils/EngineStore.kt
 new file mode 100644
-index 0000000..aae436c
+index 0000000..d0b5ddf
 --- /dev/null
 +++ b/patch/android/utils/EngineStore.kt
 @@ -0,0 +1,180 @@
@@ -3818,7 +3842,7 @@ index 0000000..aae436c
 +        val p = prefs(context)
 +        if (p.getInt(KEY_SCHEMA, 0) != EngineHybrid.VERSION) return emptyMap()
 +        val out = LinkedHashMap<String, String>()
-+        p.all().forEach { (key, value) ->
++        p.all.forEach { (key, value) ->
 +            if (key.startsWith(EngineHybrid.PREFIX) && value is String) out[key] = value
 +        }
 +        return out
