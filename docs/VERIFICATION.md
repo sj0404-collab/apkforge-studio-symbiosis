@@ -295,3 +295,21 @@ ok    в руководстве есть раздел про два ядра
 Чего эти проверки не доказывают: что второе ядро на этих настройках
 запускается на телефоне. Ни один прогон здесь не загружал
 `LibKenjinx.so`.
+
+Сборка, где это лежит в APK: run 41194617997, `06383fb1220e94734f52868edee319cf`,
+42.7 МБ, https://gofile.io/d/pFNswggh. Проверка самого APK — из dex и из таблицы
+ресурсов:
+
+```
+  ok   EnginesFragment in dex
+  ok   EngineHybrid in dex
+  ok   EngineStore in dex
+  ok   string engine_choice is in the resource table
+  ok   string launcher_core_kenji is in the resource table
+  ok   string launcher_properties is in the resource table
+```
+
+Первая попытка гибрида в Actions упала, и полезно, почему: `p.all()` вместо
+`p.all` — `SharedPreferences.getAll()` из Kotlin виден свойством. Хост-стаб был
+на Kotlin и разницу скрыл, поэтому стаб теперь на Java:
+`/home/user/hostcheck/run.sh`.
