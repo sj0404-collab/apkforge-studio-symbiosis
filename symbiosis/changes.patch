@@ -17,10 +17,10 @@ index d614e4d..a8dd809 100644
                else echo "  MISSING $sym"; fail=1; fi
              done
 diff --git a/README.md b/README.md
-index 3a98d4c..db55cb1 100644
+index 3a98d4c..fe2a2d5 100644
 --- a/README.md
 +++ b/README.md
-@@ -5,6 +5,24 @@ A fork of the [Eden](https://git.eden-emu.dev/eden-emu/eden) Android emulator, t
+@@ -5,6 +5,44 @@ A fork of the [Eden](https://git.eden-emu.dev/eden-emu/eden) Android emulator, t
  
  Target hardware for this work: **Mali-G57 MC2 / MediaTek MT6789, 8 GB RAM (~5 GB usable)**.
  
@@ -42,10 +42,30 @@ index 3a98d4c..db55cb1 100644
 +decides anything: `NativeLibraryPresenter` builds the rows, `Manual` holds the text, and both
 +are plain Kotlin checked by a host test, so the layout cannot silently disagree with the logic.
 +
++## Two cores in one
++
++Eden is compiled in; Kenji-NX (55 MB) is downloaded once and runs in its own `:kenji`
++process, so a fault in one cannot close the other. The cores were previously an
++either/or switch, and the second core ignored the settings screen entirely — its
++start-up arguments were numbers written into `KenjiBridge`.
++
++The hybrid fixes both halves:
++
++| Rule | Where |
++|---|---|
++| **Shared** settings (scale, dock, shader cache, NCE) follow Eden until you change them for the second core | `EngineHybrid.seed` |
++| **Own** settings (memory mode, PPTC, macro HLE, anisotropy, internet, integrity) belong to Kenji and Eden never overwrites them | `EngineHybrid.merge` |
++| **Core per game**, not per app: long-press a tile in the library, and the choice is remembered for that game | `EngineStore.coreFor` |
++
++Settings reach the core as a string in the Intent, because SharedPreferences are not
++shared between processes — `:kenji` would otherwise read a stale copy of the file.
++`tests/EngineHybridTest.kt` (103 checks) covers the merge, the per-game choice and the
++wiring down to the native call.
++
  ---
  
  ## Why this fork exists
-@@ -54,6 +72,7 @@ tests/
+@@ -54,6 +92,7 @@ tests/
    SetupPageTest.kt        setup-page visibility logic
    test_l10n.py            Russian localisation checks
  docs/
@@ -55,10 +75,10 @@ index 3a98d4c..db55cb1 100644
  
 diff --git a/docs/GUIDE.md b/docs/GUIDE.md
 new file mode 100644
-index 0000000..2e3a893
+index 0000000..78db6d9
 --- /dev/null
 +++ b/docs/GUIDE.md
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,152 @@
 +# Symbiosis: инструкция пользования
 +
 +Тот же текст есть в приложении: **Руководство** (кнопка на стартовом экране, а также
@@ -66,7 +86,7 @@ index 0000000..2e3a893
 +разойдутся, права инструкция: она проверяется тестом на то, что каждый раздел ссылается
 +на существующий экран (`tests/NativeLibraryPresenterTest.kt`).
 +
-+Версия текста: 1.
++Версия текста: 2.
 +
 +---
 +
@@ -127,6 +147,7 @@ index 0000000..2e3a893
 +| **Конвертер** | Распаковка сжатых образов; здесь же очередь и готовые NSP |
 +| **Ключи** | `prod.keys` и прошивка консоли |
 +| **Инструменты** | Подбор FPS, диагностика, движки, утилиты ROM, сейвы, лаунчеры, справочник настроек, руководство |
++| **Два ядра** | Гибрид: Eden + Kenji-NX, общие и свои настройки, ядро по умолчанию |
 +| **Руководство** | Эта инструкция, с поиском |
 +| **Расширенная панель** | Старая универсальная панель: пространства, выбор ядра, тонкие переключатели. Для обычной игры не нужна |
 +
@@ -135,7 +156,29 @@ index 0000000..2e3a893
 +
 +---
 +
-+## 5. Если медленно
++## 5. Два ядра: гибрид
++
++В приложении два ядра — **Eden** (встроен) и **Kenji-NX** (~55 МБ, скачивается один раз).
++Где одно падает, другое иногда едет, поэтому ядро выбирается не на всё приложение, а на игру.
++
++- **Выбрать ядро для игры.** Долгое нажатие на плитке в библиотеке → «Запустить на Eden» или
++  «Запустить на Kenji-NX». Выбор запоминается за этой игрой, а пометка «kenji» на плитке
++  показывает, каким ядром она пойдёт.
++- **Скачать второе ядро.** «Инструменты» → «Два ядра» → «Скачать». Игры, сейвы и ключи общие:
++  скачивается только ядро, библиотеку заново собирать не нужно.
++- **Как связаны настройки.** Общие строки — масштаб, режим дока, кэш шейдеров, NCE — второе
++  ядро берёт у Eden, пока вы не измените их на экране «Два ядра». Свои — память, PPTC,
++  macro HLE, анизотропия, интернет, проверка целостности — принадлежат только ему, и Eden их
++  не перетирает. Нажатие на строку переключает значение; «Вернуть значения Eden» снимает все
++  ваши переопределения.
++- **Ядро по умолчанию.** Тем же экраном: с ним запускаются игры, у которых своего ядра нет.
++- **Если второе ядро не скачано.** Игра всё равно запустится — на Eden, и приложение скажет,
++  почему не на том ядре.
++
++Переключение ядер больше ничего не стирает: у Eden свой конфиг, у Kenji свой, а выбор ядра для
++игры — одна короткая запись.
++
++## 6. Если медленно
 +
 +На Mali-G57 с 8 ГБ помогает не «включить всё», а изменить три вещи.
 +
@@ -148,7 +191,7 @@ index 0000000..2e3a893
 +
 +---
 +
-+## 6. Сейвы, папка данных, перенос
++## 7. Сейвы, папка данных, перенос
 +
 +- **Где сейвы.** Папка данных (по умолчанию — внутренняя память приложения) → `saves`.
 +  Свойства игры показывают «сейв 128 КБ», если он уже есть.
@@ -159,7 +202,7 @@ index 0000000..2e3a893
 +
 +---
 +
-+## 7. Если что-то не так: порядок проверки
++## 8. Если что-то не так: порядок проверки
 +
 +Проверяйте сверху вниз, пока не найдётся причина. Каждый пункт — один экран.
 +
@@ -169,8 +212,8 @@ index 0000000..2e3a893
 +   ключей или образ сжатый.
 +3. **Чёрный экран или вылет.** «Инструменты» → «Диагностика» → отчёт о запуске: видно,
 +   что ядро приняло, а что выбросило.
-+4. **Одна игра идёт, другая нет.** «Инструменты» → «Движки»: переключите Eden на Kenji-NX.
-+   Игра, которая не идёт на одном, иногда идёт на другом.
++4. **Одна игра идёт, другая нет.** Долгое нажатие на плитке → «Запустить на Kenji-NX».
++   Игра, которая не идёт на одном ядре, иногда идёт на другом.
 +
 +---
 +
@@ -180,10 +223,14 @@ index 0000000..2e3a893
 +|---|---|
 +| `patch/android/utils/NativeLibraryPresenter.kt` | Что показывает библиотека и что делает нажатие: порядок, бейджи, действия, строка сводки, тексты диалогов |
 +| `patch/android/utils/Manual.kt` | Текст этой инструкции; экран рисует его, тест проверяет ссылки |
++| `patch/android/utils/EngineHybrid.kt` | Гибрид: что из Eden едет во второе ядро, что остаётся своим, каким ядром запустится игра |
++| `patch/android/utils/EngineStore.kt` | Хранилище второго ядра и выбора ядра на игру |
++| `patch/android/fragments/EnginesFragment.kt` | Экран «Два ядра»: оба ядра, связь настроек, ядро по умолчанию |
 +| `patch/android/fragments/NativeLauncherFragment.kt` | Стартовый экран; не принимает решений, только рисует модель |
 +| `patch/android/fragments/ManualFragment.kt` | Экран руководства с поиском и кнопками перехода |
 +| `patch/android/navigation/home_navigation.xml` | `startDestination=@id/nativeLauncherFragment` |
-+| `tests/NativeLibraryPresenterTest.kt` | 68 проверок: логика лаунчера, тексты, разделы руководства, дрейф с навигацией |
++| `tests/NativeLibraryPresenterTest.kt` | 72 проверки: логика лаунчера, тексты, разделы руководства, дрейф с навигацией |
++| `tests/EngineHybridTest.kt` | 96 проверок: смешивание настроек двух ядер, ядро на игру, проводка до нативного вызова |
 diff --git a/docs/library.html b/docs/library.html
 index 9553244..4dc70fc 100644
 --- a/docs/library.html
@@ -701,12 +748,66 @@ index 9553244..4dc70fc 100644
  loadGames();
  loadStatus();
  applyPlugins();
+diff --git a/patch/android/activities/KenjiPlayerActivity.kt b/patch/android/activities/KenjiPlayerActivity.kt
+index 40e505c..bc9da73 100644
+--- a/patch/android/activities/KenjiPlayerActivity.kt
++++ b/patch/android/activities/KenjiPlayerActivity.kt
+@@ -32,10 +32,25 @@ class KenjiPlayerActivity : Activity(), SurfaceHolder.Callback {
+         const val EXTRA_PATH = "kenji_path"
+         const val EXTRA_TITLE = "kenji_title"
+ 
+-        fun intent(context: Context, path: String, title: String): Intent =
++        /**
++         * Действующие настройки, посчитанные в главном процессе.
++         *
++         * SharedPreferences между процессами не синхронизируются, поэтому
++         * `:kenji` не может доверять своему чтению: он получает готовый
++         * набор строкой и применяет его как есть.
++         */
++        const val EXTRA_CONFIG = "kenji_config"
++
++        fun intent(
++            context: Context,
++            path: String,
++            title: String,
++            config: String = ""
++        ): Intent =
+             Intent(context, KenjiPlayerActivity::class.java)
+                 .putExtra(EXTRA_PATH, path)
+                 .putExtra(EXTRA_TITLE, title)
++                .putExtra(EXTRA_CONFIG, config)
+                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+     }
+ 
+@@ -113,7 +128,10 @@ class KenjiPlayerActivity : Activity(), SurfaceHolder.Callback {
+             val nw = KenjiBridge.nativeWindow(holder.surface)
+             org.kenjinx.android.KenjinxNative.nativeSurface = nw
+             org.kenjinx.android.KenjinxNative.nativeWindow = nw
+-            val prep = KenjiBridge.preparePlay(this)
++            val prep = KenjiBridge.preparePlay(
++                this,
++                intent.getStringExtra(EXTRA_CONFIG).orEmpty()
++            )
+             if (!prep.ok) {
+                 runOnUiThread { fail(prep.message) }
+                 return@Thread
+@@ -128,7 +146,9 @@ class KenjiPlayerActivity : Activity(), SurfaceHolder.Callback {
+                 runOnUiThread { fail(load.message) }
+                 return@Thread
+             }
+-            runOnUiThread { status.text = "второе ядро · играет" }
++            // Строка настроек рядом со статусом: «ядро запустилось» без них
++            // ничего не говорит о том, с чем именно оно запустилось.
++            runOnUiThread { status.text = "второе ядро · играет\n" + prep.message }
+             KenjiBridge.runLoop()
+             runOnUiThread { leave() }
+         }, "kenji-loop").also { it.start() }
 diff --git a/patch/android/adapters/LauncherTileAdapter.kt b/patch/android/adapters/LauncherTileAdapter.kt
 new file mode 100644
-index 0000000..fad220d
+index 0000000..35fb6c8
 --- /dev/null
 +++ b/patch/android/adapters/LauncherTileAdapter.kt
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,105 @@
 +// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
 +// SPDX-License-Identifier: GPL-3.0-or-later
 +
@@ -760,6 +861,11 @@ index 0000000..fad220d
 +        holder.badge.text = item.badge
 +        holder.badge.isVisible = item.badge.isNotBlank()
 +
++        // Каким ядром пойдёт игра. У Eden пометки нет: он по умолчанию,
++        // и вторая метка на каждой плитке была бы шумом.
++        holder.core.text = item.core
++        holder.core.isVisible = item.core.isNotBlank()
++
 +        holder.note.text = item.note
 +        holder.note.isVisible = item.note.isNotBlank()
 +        // Красный только там, где человек ничего не исправит настройками:
@@ -803,6 +909,7 @@ index 0000000..fad220d
 +        val title: TextView = view.findViewById(R.id.text_tile_title)
 +        val subtitle: TextView = view.findViewById(R.id.text_tile_subtitle)
 +        val badge: TextView = view.findViewById(R.id.chip_tile_badge)
++        val core: TextView = view.findViewById(R.id.chip_tile_core)
 +        val note: TextView = view.findViewById(R.id.text_tile_note)
 +    }
 +}
@@ -1323,6 +1430,410 @@ index 9553244..4dc70fc 100644
  loadGames();
  loadStatus();
  applyPlugins();
+diff --git a/patch/android/fragments/EnginesFragment.kt b/patch/android/fragments/EnginesFragment.kt
+index 9d8c343..2352f38 100644
+--- a/patch/android/fragments/EnginesFragment.kt
++++ b/patch/android/fragments/EnginesFragment.kt
+@@ -10,6 +10,7 @@ import android.view.ViewGroup
+ import android.widget.Button
+ import android.widget.LinearLayout
+ import android.widget.TextView
++import androidx.core.content.ContextCompat
+ import androidx.core.view.ViewCompat
+ import androidx.core.view.WindowInsetsCompat
+ import androidx.core.view.updatePadding
+@@ -20,36 +21,37 @@ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.launch
+ import kotlinx.coroutines.withContext
+ import org.yuzu.yuzu_emu.utils.EngineDownloader
++import org.yuzu.yuzu_emu.utils.EngineHybrid
+ import org.yuzu.yuzu_emu.utils.EngineLoader
++import org.yuzu.yuzu_emu.utils.EngineStore
+ import org.yuzu.yuzu_emu.utils.KenjiProbeService
+-import org.yuzu.yuzu_emu.utils.EnginePreference
+ 
+ /**
+- * Pick which emulator core runs a game.
++ * Два ядра в одном: состояния, настройки и связь между ними.
+  *
+- * WHY TWO ENGINES AT ALL
+- *   Eden descends from yuzu, Kenji-NX from Ryujinx. They share no code and
+- *   fail on different games: where one stumbles the other sometimes runs. This
+- *   screen is the whole point of the fork - one app, either core, the same
+- *   games, keys, firmware and saves.
++ * WHY THIS SCREEN CHANGED
++ *   Раньше это был выбор «или Eden, или Kenji». Выбранное ядро запускало все
++ *   игры, а настройки второго лежали числами в коде: экран показывал ядра,
++ *   но не то, с чем каждое из них играет. Отсюда и жалоба «одни настройки
++ *   не работают с другими».
+  *
+- * WHY ONE OF THEM IS DOWNLOADED
+- *   Measured in our own CI, not estimated:
++ *   Теперь оба ядра присутствуют всегда, и у каждого свои настройки:
++ *   * **общие** строки (масштаб, док, кэш шейдеров, NCE) идут за Eden, пока
++ *     их не тронули здесь;
++ *   * **свои** (память, PPTC, macro HLE, анизотропия, интернет, проверка
++ *     целостности) принадлежат только второму ядру, и Eden их не трогает;
++ *   * **ядро для игры** выбирается на плитке в библиотеке долгим нажатием,
++ *     а здесь задаётся значение по умолчанию.
+  *
+- *     LibKenjinx.so       54.7 MB raw -> 19.6 MB inside an APK
+- *     libyuzu-android.so  34.4 MB raw -> 12.3 MB
+- *
+- *   Both in one APK is about 47 MB, and the budget is 25. Eden ships inside;
+- *   Kenji is fetched once, on demand, and the APK stays under the limit.
+- *
+- * The screen is built in code rather than XML on purpose: it is a short list
+- * of rows, and a layout file would have to be kept in step with the patch
+- * script by hand - which has already been forgotten twice in this project.
++ * Экран собран кодом, а не XML: строк становится больше, и каждая новая
++ * строка в разметке — ещё один файл, который надо не забыть скопировать в
++ * дерево сборки (в этом проекте это уже случалось дважды).
+  */
+ class EnginesFragment : Fragment() {
+ 
+     private lateinit var root: LinearLayout
+     private var busy = false
++    private var statusLine = ""
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+@@ -64,11 +66,13 @@ class EnginesFragment : Fragment() {
+         container: ViewGroup?,
+         savedInstanceState: Bundle?
+     ): View {
++        val scroll = android.widget.ScrollView(requireContext())
+         root = LinearLayout(requireContext()).apply {
+             orientation = LinearLayout.VERTICAL
+             setPadding(dp(16), dp(16), dp(16), dp(32))
+         }
+-        return root
++        scroll.addView(root)
++        return scroll
+     }
+ 
+     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+@@ -87,32 +91,89 @@ class EnginesFragment : Fragment() {
+         val ctx = requireContext()
+         root.removeAllViews()
+ 
+-        root.addView(heading("Ядра"))
++        root.addView(heading("Два ядра в одном"))
+         root.addView(
+             note(
+-                "Два плеера. Основное ядро — в этом процессе. " +
+-                    "Второе (~55 МБ, Kenji-NX) скачивается и играет в процессе :kenji: " +
+-                    "если упадёт, лаунчер останется. В APK его нет — иначе сборка раздуется вдвое."
++                "Eden встроен в приложение, Kenji-NX (~55 МБ) скачивается один раз и играет " +
++                    "в процессе :kenji: если упадёт, лаунчер останется. Ядро выбирается не на " +
++                    "всё приложение, а на игру — долгое нажатие на плитке в библиотеке."
+             )
+         )
+-
+-        val current = EnginePreference.selected(ctx)
++        if (statusLine.isNotEmpty()) {
++            root.addView(
++                TextView(ctx).apply {
++                    text = statusLine
++                    textSize = 14f
++                    setTextColor(accent())
++                    setPadding(0, 0, 0, dp(8))
++                }
++            )
++        }
+ 
+         for (engine in EngineLoader.Engine.values()) {
+-            root.addView(engineRow(engine, engine == current))
++            root.addView(engineRow(engine))
+         }
+ 
+         if (!EngineLoader.deviceSupported()) {
+             root.addView(
+                 note(
+-                    "Это устройство не 64-битное (arm64), поэтому скачиваемое " +
+-                        "ядро на нём не запустится. Доступен только Eden."
++                    "Это устройство не 64-битное (arm64), поэтому скачиваемое ядро на нём " +
++                        "не запустится. Доступен только Eden."
+                 )
+             )
+         }
++
++        root.addView(heading("Связь настроек"))
++        root.addView(
++            note(
++                "«из Eden» — значение берётся у основного ядра, пока вы не измените его здесь. " +
++                    "«своё» — принадлежит второму ядру, Eden его не перетирает. Нажмите строку, " +
++                    "чтобы переключить."
++            )
++        )
++        EngineStore.rows(ctx).forEach { row -> root.addView(settingRow(row)) }
++        root.addView(
++            note(
++                "Второе ядро сейчас: " + EngineStore.summary(ctx)
++            )
++        )
++        root.addView(
++            button("Вернуть значения Eden") {
++                statusLine = EngineStore.resetFields(ctx)
++                render()
++            }
++        )
++
++        root.addView(heading("Ядро по умолчанию"))
++        root.addView(
++            note(
++                "С ним запускаются игры, у которых не выбран свой ядро. Сейчас: " +
++                    EngineStore.globalCore(ctx).label + "."
++            )
++        )
++        val cores = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
++        cores.addView(button("Eden") {
++            EngineStore.setGlobalCore(ctx, EngineHybrid.Core.EDEN)
++            statusLine = "по умолчанию: Eden"
++            render()
++        })
++        cores.addView(button("Kenji-NX") {
++            val state = EngineLoader.state(ctx, EngineLoader.Engine.KENJI)
++            val usable = state is EngineLoader.State.Ready || state is EngineLoader.State.Builtin
++            if (!usable) {
++                statusLine = "сначала скачайте второе ядро — без него игры пойдут на Eden"
++                render()
++                return@button
++            }
++            EngineStore.setGlobalCore(ctx, EngineHybrid.Core.KENJI)
++            statusLine = "по умолчанию: Kenji-NX"
++            render()
++        })
++        root.addView(cores)
+     }
+ 
+-    private fun engineRow(engine: EngineLoader.Engine, selected: Boolean): View {
++    /** Ядро: состояние и действия. Оба видны всегда — это и есть «в одном». */
++    private fun engineRow(engine: EngineLoader.Engine): View {
+         val ctx = requireContext()
+         val box = LinearLayout(ctx).apply {
+             orientation = LinearLayout.VERTICAL
+@@ -123,20 +184,24 @@ class EnginesFragment : Fragment() {
+             )
+             lp.bottomMargin = dp(12)
+             layoutParams = lp
++            background = cardBackground()
+         }
+ 
++        val isDefault = EngineStore.globalCore(ctx) == EngineHybrid.Core.of(engine.id)
+         val state = EngineLoader.state(ctx, engine)
+-        val title = TextView(ctx).apply {
+-            text = if (selected) "${engine.label}  ✓ выбран" else engine.label
+-            textSize = 17f
+-        }
+-        box.addView(title)
++
++        box.addView(
++            TextView(ctx).apply {
++                text = if (isDefault) "${engine.label}  ✓ по умолчанию" else engine.label
++                textSize = 17f
++            }
++        )
+ 
+         val describe = when (state) {
+             is EngineLoader.State.Builtin ->
+-                "встроен в приложение · всегда доступен"
++                "встроен в приложение · всегда доступен · свой конфиг Eden"
+             is EngineLoader.State.Ready ->
+-                "скачан · ${state.bytes / 1048576} МБ в памяти устройства"
++                "скачан · ${state.bytes / 1048576} МБ на устройстве · свой конфиг Kenji"
+             is EngineLoader.State.Missing ->
+                 "не скачан · потребуется ${state.bytes / 1048576} МБ загрузки"
+             is EngineLoader.State.Broken ->
+@@ -145,58 +210,24 @@ class EnginesFragment : Fragment() {
+         box.addView(note(describe))
+ 
+         val buttons = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+-
+-        // Selecting is only offered when the engine can actually start. A
+-        // button that sets a preference and then fails at launch is worse than
+-        // no button.
+         val usable = state is EngineLoader.State.Builtin || state is EngineLoader.State.Ready
+-        if (usable && !selected) {
+-            buttons.addView(button("Выбрать") {
+-                EnginePreference.select(ctx, engine)
+-                render()
+-            })
+-        }
+-        if (usable) {
+-            buttons.addView(button("Запустить") {
+-                EnginePreference.select(ctx, engine)
+-                val last = org.yuzu.yuzu_emu.utils.LivePanel.rememberedGames()
+-                    .maxByOrNull { org.yuzu.yuzu_emu.utils.LivePanel.lastPlayedOf(it.path) }
+-                if (engine == EngineLoader.Engine.KENJI && last != null) {
+-                    startActivity(
+-                        org.yuzu.yuzu_emu.activities.KenjiPlayerActivity.intent(
+-                            ctx, last.path, last.title
+-                        )
+-                    )
+-                } else {
+-                    android.widget.Toast.makeText(
+-                        ctx,
+-                        if (last == null) "вернитесь на лаунчер и нажмите Запустить на игре"
+-                        else "ядро выбрано — на лаунчере нажмите Запустить",
+-                        android.widget.Toast.LENGTH_LONG
+-                    ).show()
+-                    requireActivity().onBackPressedDispatcher.onBackPressed()
+-                }
+-            })
+-        }
+ 
++        if (usable && engine == EngineLoader.Engine.KENJI) {
++            buttons.addView(button("Проверить") { probe(engine) })
++        }
+         if (state is EngineLoader.State.Missing || state is EngineLoader.State.Broken) {
+             if (EngineLoader.deviceSupported()) {
+                 val mb = (EngineLoader.KNOWN_SIZE[engine] ?: 0L) / 1048576
+                 buttons.addView(button("Скачать ($mb МБ)") { fetch(engine) })
+             }
+         }
+-
+-        // Only offered once the core is present, and it is the honest test:
+-        // everything before this point proves the FILE is right, not that the
+-        // core will run on this device.
+-        if (state is EngineLoader.State.Ready) {
+-            buttons.addView(button("Проверить") { probe(engine) })
+-        }
+-
+         if (state is EngineLoader.State.Ready) {
+             buttons.addView(button("Удалить") {
+-                if (selected) EnginePreference.select(ctx, EngineLoader.Engine.EDEN)
++                if (EngineStore.globalCore(ctx) == EngineHybrid.Core.KENJI) {
++                    EngineStore.setGlobalCore(ctx, EngineHybrid.Core.EDEN)
++                }
+                 EngineLoader.remove(ctx, engine)
++                statusLine = "второе ядро удалено · игры пойдут на Eden"
+                 render()
+             })
+         }
+@@ -205,6 +236,68 @@ class EnginesFragment : Fragment() {
+         return box
+     }
+ 
++    /** Строка настройки: нажатие переключает значение. */
++    private fun settingRow(row: EngineHybrid.Row): View {
++        val ctx = requireContext()
++        val field = EngineHybrid.FIELDS.firstOrNull { it.id == row.id }
++        val line = LinearLayout(ctx).apply {
++            orientation = LinearLayout.HORIZONTAL
++            setPadding(0, dp(10), 0, dp(10))
++            isClickable = true
++            isFocusable = true
++            setOnClickListener {
++                statusLine = EngineStore.cycleField(ctx, row.id)
++                render()
++            }
++        }
++        line.addView(
++            LinearLayout(ctx).apply {
++                orientation = LinearLayout.VERTICAL
++                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
++                layoutParams = lp
++                addView(
++                    TextView(ctx).apply {
++                        text = row.label
++                        textSize = 15f
++                    }
++                )
++                if (field != null && field.hint.isNotEmpty()) {
++                    addView(note(field.hint))
++                }
++            }
++        )
++        line.addView(
++            TextView(ctx).apply {
++                text = row.value
++                textSize = 15f
++                setTextColor(accent())
++                val lp = LinearLayout.LayoutParams(
++                    LinearLayout.LayoutParams.WRAP_CONTENT,
++                    LinearLayout.LayoutParams.WRAP_CONTENT
++                )
++                lp.marginStart = dp(8)
++                layoutParams = lp
++            }
++        )
++        line.addView(
++            TextView(ctx).apply {
++                text = when (row.source) {
++                    EngineHybrid.Source.EDEN -> "из Eden"
++                    EngineHybrid.Source.OWN -> "своё"
++                }
++                textSize = 12f
++                alpha = 0.7f
++                val lp = LinearLayout.LayoutParams(
++                    LinearLayout.LayoutParams.WRAP_CONTENT,
++                    LinearLayout.LayoutParams.WRAP_CONTENT
++                )
++                lp.marginStart = dp(8)
++                layoutParams = lp
++            }
++        )
++        return line
++    }
++
+     private fun fetch(engine: EngineLoader.Engine) {
+         if (busy) return
+         busy = true
+@@ -240,6 +333,7 @@ class EnginesFragment : Fragment() {
+                     status.text = "Скачано, но не загрузилось: $err"
+                     return@launch
+                 }
++                statusLine = "второе ядро скачано · настройки у него свои"
+                 render()
+             }
+         }
+@@ -265,17 +359,43 @@ class EnginesFragment : Fragment() {
+         }
+     }
+ 
++    private fun accent(): Int = resolveAttr(com.google.android.material.R.attr.colorPrimary)
++
++    private fun cardBackground(): android.graphics.drawable.Drawable? {
++        val view = TextView(requireContext())
++        val value = android.util.TypedValue()
++        val theme = view.context.theme
++        val ok = theme.resolveAttribute(com.google.android.material.R.attr.colorSurfaceVariant, value, true)
++        return if (ok) {
++            android.graphics.drawable.GradientDrawable().apply {
++                cornerRadius = dp(16).toFloat()
++                setColor(value.data)
++            }
++        } else {
++            null
++        }
++    }
++
++    private fun resolveAttr(attr: Int): Int {
++        val value = android.util.TypedValue()
++        return if (requireContext().theme.resolveAttribute(attr, value, true)) {
++            value.data
++        } else {
++            ContextCompat.getColor(requireContext(), android.R.color.primary_text_dark)
++        }
++    }
++
+     private fun heading(text: String) = TextView(requireContext()).apply {
+         this.text = text
+         textSize = 20f
+-        setPadding(0, 0, 0, dp(8))
++        setPadding(0, dp(12), 0, dp(8))
+     }
+ 
+     private fun note(text: String) = TextView(requireContext()).apply {
+         this.text = text
+         textSize = 14f
+         alpha = 0.75f
+-        setPadding(0, dp(2), 0, dp(8))
++        setPadding(0, dp(2), 0, dp(6))
+     }
+ 
+     private fun button(text: String, onClick: () -> Unit) = Button(requireContext()).apply {
 diff --git a/patch/android/fragments/GamePropertiesFragment.kt b/patch/android/fragments/GamePropertiesFragment.kt
 index 981661e..3f5048e 100644
 --- a/patch/android/fragments/GamePropertiesFragment.kt
@@ -1346,7 +1857,7 @@ index 981661e..3f5048e 100644
          }
  
 diff --git a/patch/android/fragments/LivePanelFragment.kt b/patch/android/fragments/LivePanelFragment.kt
-index 993d3fc..a848c98 100644
+index 993d3fc..dcafa7f 100644
 --- a/patch/android/fragments/LivePanelFragment.kt
 +++ b/patch/android/fragments/LivePanelFragment.kt
 @@ -5,6 +5,7 @@ package org.yuzu.yuzu_emu.fragments
@@ -1384,6 +1895,22 @@ index 993d3fc..a848c98 100644
          @JavascriptInterface
          fun canOpen(path: String): Boolean = runCatching {
              Converter.canOpen(path)
+@@ -691,7 +712,14 @@ class LivePanelFragment : Fragment() {
+                     runCatching {
+                         act.startActivity(
+                             org.yuzu.yuzu_emu.activities.KenjiPlayerActivity.intent(
+-                                act, game.path, game.title
++                                act,
++                                game.path,
++                                game.title,
++                                // Настройки считает этот процесс: :kenji не видит
++                                // наше хранилище, prefs между процессами не общие.
++                                runCatching {
++                                    org.yuzu.yuzu_emu.utils.EngineStore.effectiveText(act)
++                                }.getOrDefault("")
+                             )
+                         )
+                     }.onFailure {
 diff --git a/patch/android/fragments/ManualFragment.kt b/patch/android/fragments/ManualFragment.kt
 new file mode 100644
 index 0000000..5df4ccc
@@ -1583,10 +2110,10 @@ index 0000000..5df4ccc
 +}
 diff --git a/patch/android/fragments/NativeLauncherFragment.kt b/patch/android/fragments/NativeLauncherFragment.kt
 new file mode 100644
-index 0000000..20300d5
+index 0000000..1bd8cc3
 --- /dev/null
 +++ b/patch/android/fragments/NativeLauncherFragment.kt
-@@ -0,0 +1,367 @@
+@@ -0,0 +1,456 @@
 +// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
 +// SPDX-License-Identifier: GPL-3.0-or-later
 +
@@ -1608,6 +2135,7 @@ index 0000000..20300d5
 +import androidx.navigation.fragment.findNavController
 +import androidx.recyclerview.widget.LinearLayoutManager
 +import com.google.android.material.chip.Chip
++import com.google.android.material.dialog.MaterialAlertDialogBuilder
 +import com.google.android.material.snackbar.Snackbar
 +import com.google.android.material.transition.MaterialSharedAxis
 +import org.yuzu.yuzu_emu.HomeNavigationDirections
@@ -1617,6 +2145,9 @@ index 0000000..20300d5
 +import org.yuzu.yuzu_emu.model.Game
 +import org.yuzu.yuzu_emu.model.GamesViewModel
 +import org.yuzu.yuzu_emu.utils.ConverterPicker
++import org.yuzu.yuzu_emu.utils.EngineHybrid
++import org.yuzu.yuzu_emu.utils.EngineLoader
++import org.yuzu.yuzu_emu.utils.EngineStore
 +import org.yuzu.yuzu_emu.utils.GameHelper
 +import org.yuzu.yuzu_emu.utils.NativeLibraryPresenter
 +import org.yuzu.yuzu_emu.utils.collect
@@ -1789,13 +2320,17 @@ index 0000000..20300d5
 +    private fun render() {
 +        if (_binding == null) return
 +
++        val ctx = requireContext().applicationContext
 +        val rows = games.map { game ->
++            val core = runCatching { EngineStore.coreFor(ctx, game.path) }
++                .getOrDefault(EngineHybrid.Core.EDEN)
 +            NativeLibraryPresenter.Row(
 +                title = game.title,
 +                path = game.path,
 +                titleId = runCatching { game.programIdHex }.getOrDefault(""),
 +                developer = game.developer,
-+                fileName = fileNameOf(game.path)
++                fileName = fileNameOf(game.path),
++                core = if (core == EngineHybrid.Core.KENJI) core.short else ""
 +            )
 +        }
 +
@@ -1836,7 +2371,10 @@ index 0000000..20300d5
 +        when (item.action) {
 +            NativeLibraryPresenter.Action.LAUNCH -> {
 +                val game = games.getOrNull(item.gameIndex) ?: return
-+                navigateToGame(game)
++                val ctx = requireContext().applicationContext
++                val core = runCatching { EngineStore.coreFor(ctx, game.path) }
++                    .getOrDefault(EngineHybrid.Core.EDEN)
++                launchOn(game, core)
 +            }
 +            NativeLibraryPresenter.Action.CONVERT -> askConvert(item)
 +            NativeLibraryPresenter.Action.KEYS -> explainUnreadable(item)
@@ -1844,8 +2382,49 @@ index 0000000..20300d5
 +        }
 +    }
 +
++    /**
++     * Долгое нажатие: каким ядром играть.
++     *
++     * Выбор запоминается за игрой, а не за приложением: одна библиотека
++     * ходит на двух ядрах, и переключение одной игры не трогает остальные.
++     */
 +    private fun onItemLongClick(item: NativeLibraryPresenter.Item) {
 +        val game = games.getOrNull(item.gameIndex) ?: return
++        val ctx = requireContext().applicationContext
++        val current = runCatching { EngineStore.coreFor(ctx, game.path) }
++            .getOrDefault(EngineHybrid.Core.EDEN)
++        val options = arrayOf(
++            getString(R.string.launcher_core_eden),
++            getString(R.string.launcher_core_kenji),
++            getString(R.string.launcher_properties)
++        )
++        MaterialAlertDialogBuilder(requireContext())
++            .setTitle(game.title)
++            .setItems(options) { _, which ->
++                when (which) {
++                    0 -> runOnCore(game, EngineHybrid.Core.EDEN)
++                    1 -> runOnCore(game, EngineHybrid.Core.KENJI)
++                    else -> openProperties(game)
++                }
++            }
++            .setMessage(
++                getString(
++                    R.string.launcher_core_now,
++                    if (current == EngineHybrid.Core.KENJI) "Kenji-NX" else "Eden"
++                )
++            )
++            .show()
++    }
++
++    /** Запомнить ядро за игрой и запустить её этим ядром. */
++    private fun runOnCore(game: Game, core: EngineHybrid.Core) {
++        val ctx = requireContext().applicationContext
++        runCatching { EngineStore.setCoreFor(ctx, game.path, core) }
++        render()
++        launchOn(game, core)
++    }
++
++    private fun openProperties(game: Game) {
 +        runCatching {
 +            findNavController().navigate(
 +                HomeNavigationDirections.actionGlobalPerGamePropertiesFragment(game)
@@ -1854,6 +2433,43 @@ index 0000000..20300d5
 +            Snackbar.make(binding.root, R.string.launcher_properties_failed, Snackbar.LENGTH_LONG)
 +                .show()
 +        }
++    }
++
++    /**
++     * Запуск выбранным ядром.
++     *
++     * Если второе ядро не скачано или не прошло проверку, игра всё равно
++     * запускается — на Eden, с честным сообщением. Молча ничего не
++     * открывать хуже, чем открыть и сказать, почему не тем ядром.
++     */
++    private fun launchOn(game: Game, core: EngineHybrid.Core) {
++        if (core == EngineHybrid.Core.EDEN) {
++            navigateToGame(game)
++            return
++        }
++        val ctx = requireContext().applicationContext
++        val state = runCatching { EngineLoader.state(ctx, EngineLoader.Engine.KENJI) }.getOrNull()
++        val usable = state is EngineLoader.State.Ready || state is EngineLoader.State.Builtin
++        if (usable) {
++            val started = runCatching {
++                startActivity(
++                    org.yuzu.yuzu_emu.activities.KenjiPlayerActivity.intent(
++                        requireContext(),
++                        game.path,
++                        game.title,
++                        runCatching { EngineStore.effectiveText(ctx) }.getOrDefault("")
++                    )
++                )
++            }.isSuccess
++            if (started) return
++        }
++        val why = when (state) {
++            is EngineLoader.State.Missing -> getString(R.string.launcher_core_kenji_missing)
++            is EngineLoader.State.Broken -> getString(R.string.launcher_core_kenji_broken, state.reason)
++            else -> getString(R.string.launcher_core_kenji_failed)
++        }
++        Snackbar.make(binding.root, why, Snackbar.LENGTH_LONG).show()
++        navigateToGame(game)
 +    }
 +
 +    private fun navigate(destination: Int) {
@@ -1955,10 +2571,29 @@ index 0000000..20300d5
 +    }
 +}
 diff --git a/patch/android/fragments/ToolsFragment.kt b/patch/android/fragments/ToolsFragment.kt
-index 4cc4ad2..f5eca92 100644
+index 4cc4ad2..b79a895 100644
 --- a/patch/android/fragments/ToolsFragment.kt
 +++ b/patch/android/fragments/ToolsFragment.kt
-@@ -129,13 +129,30 @@ class ToolsFragment : Fragment() {
+@@ -65,6 +65,18 @@ class ToolsFragment : Fragment() {
+         // the launch report and FPS tuning are what a struggling device calls
+         // for, and burying them under the ROM tools helps nobody.
+         val tools = mutableListOf<HomeSetting>().apply {
++            // Два ядра — первым: это не «ещё одна настройка», а второе ядро
++            // эмулятора. Раньше этот экран был доступен только со старого
++            // домашнего экрана, то есть после перевода библиотеки на нативную
++            // вёрстку до него было не добраться.
++            add(
++                HomeSetting(
++                    R.string.engine_choice,
++                    R.string.engine_choice_description,
++                    R.drawable.ic_verified,
++                    { nav(R.id.action_global_enginesFragment) }
++                )
++            )
+             add(
+                 HomeSetting(
+                     R.string.fps_tuning,
+@@ -129,13 +141,30 @@ class ToolsFragment : Fragment() {
                      { nav(R.id.action_global_guideFragment) }
                  )
              )
@@ -2388,10 +3023,10 @@ index 0000000..c4dd5b5
 +</androidx.coordinatorlayout.widget.CoordinatorLayout>
 diff --git a/patch/android/layout/item_launcher_tile.xml b/patch/android/layout/item_launcher_tile.xml
 new file mode 100644
-index 0000000..b042e0a
+index 0000000..c7759d4
 --- /dev/null
 +++ b/patch/android/layout/item_launcher_tile.xml
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,106 @@
 +<?xml version="1.0" encoding="utf-8"?>
 +<!--
 +SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
@@ -2457,6 +3092,19 @@ index 0000000..b042e0a
 +                    tools:text="Nintendo · 01001F5010DCC000" />
 +
 +            </LinearLayout>
++
++            <com.google.android.material.chip.Chip
++                android:id="@+id/chip_tile_core"
++                style="@style/Widget.Material3.Chip.Assist"
++                android:layout_width="wrap_content"
++                android:layout_height="wrap_content"
++                android:layout_marginStart="8dp"
++                android:clickable="false"
++                android:focusable="false"
++                android:textAppearance="?attr/textAppearanceLabelSmall"
++                android:visibility="gone"
++                tools:text="kenji"
++                tools:visibility="visible" />
 +
 +            <com.google.android.material.chip.Chip
 +                android:id="@+id/chip_tile_badge"
@@ -2655,6 +3303,658 @@ index 0000000..731bc75
 +    /** Открыть системный выбор файлов. */
 +    fun pick() {
 +        runCatching { picker.launch(arrayOf("*/*")) }.onFailure { onFailed() }
++    }
++}
+diff --git a/patch/android/utils/EngineHybrid.kt b/patch/android/utils/EngineHybrid.kt
+new file mode 100644
+index 0000000..9986ee8
+--- /dev/null
++++ b/patch/android/utils/EngineHybrid.kt
+@@ -0,0 +1,460 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++package org.yuzu.yuzu_emu.utils
++
++import java.security.MessageDigest
++import java.util.Locale
++
++/**
++ * Два ядра в одном: как настройки Eden и Kenji-NX живут вместе.
++ *
++ * WHY THIS FILE EXISTS
++ *   В приложении два ядра — Eden (собран в APK) и Kenji-NX (скачивается
++ *   отдельным файлом). Игры на них идут разные: где одно падает, другое
++ *   иногда едет. Но настройки были устроены как «или-или»: выбрать второе
++ *   ядро значило потерять настройки первого, а сам Kenji запускался с
++ *   числами, вписанными в код (`preparePlay`), — то есть его настройки не
++ *   влияли ни на что.
++ *
++ *   Гибрид — это три правила, и все три живут здесь, в чистом Kotlin:
++ *
++ *     1. **общие** настройки (масштаб, док, кэш шейдеров, NCE, язык,
++ *        регион) Kenji берёт из Eden, пока человек не тронул их руками;
++ *     2. **свои** настройки Kenji (режим памяти, PPTC, macro HLE, время
++ *        GPU, анизотропия, интернет, проверка целостности) у каждого ядра
++ *        собственные и Eden их не перетирает;
++ *     3. **ядро на игру** — не глобальный переключатель, а свойство игры:
++ *        одна и та же библиотека запускается на двух ядрах по очереди, и
++ *        ни один выбор не стирает другой.
++ *
++ * WHY NO ANDROID HERE
++ *   Хранилище — SharedPreferences, чтение настроек Eden — рефлексия по его
++ *   enum'ам; оба конца живут в [EngineStore]. Этот файл собирается обычным
++ *   kotlinc и проверяется на хосте (`tests/EngineHybridTest.kt`), поэтому
++ *   «какие настройки куда поедут» можно доказать, не собирая APK.
++ */
++object EngineHybrid {
++
++    /**
++     * Версия схемы хранения.
++     *
++     * Поднимается, если меняется смысл сохранённых значений. Старое
++     * хранилище тогда читается как «ничего не сохранено», а не как мусор,
++     * который тихо ломает запуск.
++     */
++    const val VERSION = 1
++
++    /** Какое ядро запускает игру. */
++    enum class Core(val id: String, val label: String, val short: String) {
++        EDEN("eden", "Eden · основное ядро", "eden"),
++        KENJI("kenji", "Kenji-NX · второе ядро", "kenji");
++
++        companion object {
++            fun of(id: String?): Core = values().firstOrNull { it.id == id } ?: EDEN
++        }
++    }
++
++    /** Откуда взялось значение настройки второго ядра. */
++    enum class Source {
++        /** Подтянуто из Eden: общая настройка, пока не тронута руками. */
++        EDEN,
++
++        /** Своё значение второго ядра. */
++        OWN
++    }
++
++    /** Строка «что куда поедет» для экрана ядер. */
++    data class Row(
++        val id: String,
++        val label: String,
++        val value: String,
++        val source: Source
++    )
++
++    /**
++     * Настройки второго ядра — ровно те аргументы, которые принимают
++     * `nativeDeviceInit` и `nativeGraphicsInit` моста.
++     *
++     * Значения по умолчанию повторяют то, что раньше было вписано в код
++     * (`KenjiBridge.preparePlay`): 4 ГБ, PPTC включён, NCE выключен,
++     * масштаб 1x. Это не «правильные» настройки, а проверенные на этом
++     * телефоне — менять их стоит по одной.
++     */
++    data class KenjiConfig(
++        // deviceInitialize
++        val memoryManagerMode: Int = 2,
++        val useNce: Boolean = false,
++        val memoryConfiguration: Int = 0,
++        val systemLanguage: Int = 1,
++        val regionCode: Int = 1,
++        val vSyncMode: Int = 0,
++        val enableDockedMode: Boolean = false,
++        val enablePtc: Boolean = true,
++        val enableLowPowerPtc: Boolean = false,
++        val enableJitCacheEviction: Boolean = false,
++        val enableInternetAccess: Boolean = false,
++        val enableFsIntegrityChecks: Boolean = false,
++        val fsGlobalAccessLogMode: Int = 0,
++        val timeZone: String = "UTC",
++        val ignoreMissingServices: Boolean = false,
++        // graphicsInitialize
++        val resScale: Float = 1f,
++        val maxAnisotropy: Float = 0f,
++        val fastGpuTime: Boolean = true,
++        val fast2DCopy: Boolean = true,
++        val enableMacroJit: Boolean = false,
++        val enableMacroHLE: Boolean = true,
++        val enableShaderCache: Boolean = true,
++        val enableTextureRecompression: Boolean = false,
++        val backendThreading: Int = 1
++    )
++
++    /**
++     * Что мы умеем прочитать у Eden и передать второму ядру.
++     *
++     * Только то, что реально существует в настройках Eden: масштаб
++     * (`RENDERER_RESOLUTION`), док (`USE_DOCKED_MODE`), кэш шейдеров
++     * (`RENDERER_USE_DISK_SHADER_CACHE`), CPU-бэкенд (`CPU_BACKEND`).
++     * Читаются рефлексией в [EngineStore]; сюда приходят уже числами, чтобы
++     * этот файл оставался без Android.
++     */
++    data class EdenSnapshot(
++        val resolutionScale: Float = 1f,
++        val docked: Boolean = false,
++        val shaderCache: Boolean = true,
++        val nce: Boolean = false,
++        val ramGb: Int = 8,
++        val language: Int = 1,
++        val region: Int = 1
++    )
++
++    /** Значения, которые задаёт Eden, пока человек не переопределил их у Kenji. */
++    fun seed(eden: EdenSnapshot): KenjiConfig = KenjiConfig(
++        resScale = clampScale(eden.resolutionScale),
++        enableDockedMode = eden.docked,
++        enableShaderCache = eden.shaderCache,
++        useNce = eden.nce,
++        // 4 ГБ по умолчанию; на устройствах от 12 ГБ — режим 6 ГБ.
++        memoryManagerMode = if (eden.ramGb >= 12) 3 else 2,
++        systemLanguage = eden.language,
++        regionCode = eden.region
++    )
++
++    /**
++     * Свести настройки обоих ядер в один набор для запуска.
++     *
++     * `stored` — то, что человек изменил руками у второго ядра (ключи вида
++     * `kenji.<id>`). Ничего не удаляется: каждое сохранённое поле
++     * перекрывает только своё, остальные продолжают следовать Eden. Именно
++     * поэтому переключение ядер больше ничего не стирает.
++     */
++    fun merge(eden: EdenSnapshot, stored: Map<String, String>): KenjiConfig {
++        var cfg = seed(eden)
++        stored.forEach { (key, raw) ->
++            apply(cfg, key, raw)?.let { cfg = it }
++        }
++        return cfg
++    }
++
++    /**
++     * Применить одно сохранённое значение.
++     *
++     * Возвращает null для неизвестного ключа и для мусора в значении:
++     * испорченная запись должна оставить настройку в значении из Eden, а не
++     * уронить запуск разбором строки.
++     */
++    fun apply(cfg: KenjiConfig, key: String, raw: String): KenjiConfig? {
++        val id = key.removePrefix(PREFIX)
++        val v = raw.trim()
++        return when (id) {
++            "memory" -> v.toIntOrNull()?.takeIf { it in 0..3 }?.let {
++                cfg.copy(memoryManagerMode = it)
++            }
++            "nce" -> bool(v)?.let { cfg.copy(useNce = it) }
++            "docked" -> bool(v)?.let { cfg.copy(enableDockedMode = it) }
++            "shaderCache" -> bool(v)?.let { cfg.copy(enableShaderCache = it) }
++            "ptc" -> bool(v)?.let { cfg.copy(enablePtc = it) }
++            "lowPowerPtc" -> bool(v)?.let { cfg.copy(enableLowPowerPtc = it) }
++            "macroHle" -> bool(v)?.let { cfg.copy(enableMacroHLE = it) }
++            "macroJit" -> bool(v)?.let { cfg.copy(enableMacroJit = it) }
++            "fastGpuTime" -> bool(v)?.let { cfg.copy(fastGpuTime = it) }
++            "fast2DCopy" -> bool(v)?.let { cfg.copy(fast2DCopy = it) }
++            "internet" -> bool(v)?.let { cfg.copy(enableInternetAccess = it) }
++            "integrity" -> bool(v)?.let { cfg.copy(enableFsIntegrityChecks = it) }
++            "vsync" -> v.toIntOrNull()?.takeIf { it in 0..2 }?.let {
++                cfg.copy(vSyncMode = it)
++            }
++            "scale" -> v.toFloatOrNull()?.takeIf { it in 0.25f..4f }?.let {
++                cfg.copy(resScale = clampScale(it))
++            }
++            "aniso" -> v.toFloatOrNull()?.takeIf { it in 0f..16f }?.let {
++                cfg.copy(maxAnisotropy = it)
++            }
++            "threads" -> v.toIntOrNull()?.takeIf { it in 0..4 }?.let {
++                cfg.copy(backendThreading = it)
++            }
++            else -> null
++        }
++    }
++
++    /** Текущее значение поля в той же кодировке, в какой оно хранится. */
++    fun raw(cfg: KenjiConfig, id: String): String = when (id) {
++        "memory" -> cfg.memoryManagerMode.toString()
++        "nce" -> cfg.useNce.toString()
++        "docked" -> cfg.enableDockedMode.toString()
++        "shaderCache" -> cfg.enableShaderCache.toString()
++        "ptc" -> cfg.enablePtc.toString()
++        "lowPowerPtc" -> cfg.enableLowPowerPtc.toString()
++        "macroHle" -> cfg.enableMacroHLE.toString()
++        "macroJit" -> cfg.enableMacroJit.toString()
++        "fastGpuTime" -> cfg.fastGpuTime.toString()
++        "fast2DCopy" -> cfg.fast2DCopy.toString()
++        "internet" -> cfg.enableInternetAccess.toString()
++        "integrity" -> cfg.enableFsIntegrityChecks.toString()
++        "vsync" -> cfg.vSyncMode.toString()
++        "scale" -> trimFloat(cfg.resScale)
++        "aniso" -> trimFloat(cfg.maxAnisotropy)
++        "threads" -> cfg.backendThreading.toString()
++        else -> ""
++    }
++
++    /** Подпись значения для человека. */
++    fun label(cfg: KenjiConfig, id: String): String {
++        val value = raw(cfg, id)
++        val field = FIELDS.firstOrNull { it.id == id }
++        return field?.choices?.firstOrNull { it.value == value }?.label ?: value
++    }
++
++    /** Следующее значение поля — по кругу. Для строки-переключателя. */
++    fun next(cfg: KenjiConfig, id: String): String {
++        val choices = FIELDS.firstOrNull { it.id == id }?.choices ?: return raw(cfg, id)
++        if (choices.isEmpty()) return raw(cfg, id)
++        val current = choices.indexOfFirst { it.value == raw(cfg, id) }
++        return choices[(current + 1).mod(choices.size)].value
++    }
++
++    /**
++     * Что изменится у второго ядра, если поменять настройку Eden.
++     *
++     * Список — это и есть «гибрид» на экране: видно, какие строки общие,
++     * а какие принадлежат только Kenji.
++     */
++    fun rows(eden: EdenSnapshot, stored: Map<String, String>): List<Row> {
++        val cfg = merge(eden, stored)
++        return FIELDS.map { field ->
++            val own = stored.containsKey(PREFIX + field.id)
++            Row(
++                id = field.id,
++                label = field.label,
++                value = label(cfg, field.id),
++                source = when {
++                    own -> Source.OWN
++                    field.shared -> Source.EDEN
++                    else -> Source.OWN
++                }
++            )
++        }
++    }
++
++    /** Короткая строка для экрана игры и статуса плеера. */
++    fun summary(cfg: KenjiConfig): String = buildString {
++        append("масштаб ").append(trimFloat(cfg.resScale)).append('x')
++        append(" · память ").append(memoryLabel(cfg.memoryManagerMode))
++        append(" · NCE ").append(if (cfg.useNce) "вкл" else "выкл")
++        append(" · док ").append(if (cfg.enableDockedMode) "вкл" else "выкл")
++        if (cfg.maxAnisotropy > 0f) append(" · анизо ").append(trimFloat(cfg.maxAnisotropy))
++    }
++
++    /** Каким ядром запускать игру: своё значение важнее общего. */
++    fun coreFor(defaultEngineId: String, perGameEngineId: String?): Core =
++        if (!perGameEngineId.isNullOrBlank()) Core.of(perGameEngineId) else Core.of(defaultEngineId)
++
++    /**
++     * Ключ игры для хранения выбора ядра.
++     *
++     * Путь бывает content-URI с пробелами и кириллицей, поэтому ключ — это
++     * SHA-256, обрезанный до 16 hex-символов: коллизий для одной библиотеки
++     * нет, а SharedPreferences не получает ключи длиной в URI.
++     */
++    fun gameKey(path: String): String {
++        if (path.isEmpty()) return ""
++        val md = MessageDigest.getInstance("SHA-256")
++        val digest = md.digest(path.toByteArray(Charsets.UTF_8))
++        return digest.joinToString("") { "%02x".format(it) }.take(16)
++    }
++
++    fun memoryLabel(mode: Int): String = when (mode) {
++        0 -> "как на хосте"
++        1 -> "2 ГБ"
++        2 -> "4 ГБ"
++        3 -> "6 ГБ"
++        else -> "режим $mode"
++    }
++
++    /** Ограничение масштаба: ниже 0.25 рисуется в никуда, выше 4 — слайд-шоу. */
++    fun clampScale(value: Float): Float = when {
++        value.isNaN() -> 1f
++        value < 0.25f -> 0.25f
++        value > 4f -> 4f
++        else -> value
++    }
++
++    /** `1.0` → `1`, `0.75` → `0.75`: человеку не нужен хвост нулей. */
++    fun trimFloat(value: Float): String {
++        val text = String.format(Locale.ROOT, "%.2f", value)
++        return text.trimEnd('0').trimEnd('.').ifEmpty { "0" }
++    }
++
++    /**
++     * Свернуть набор значений в строку для передачи в другой процесс.
++     *
++     * ЗАЧЕМ: второй плеер живёт в процессе `:kenji`, а SharedPreferences
++     * между процессами не синхронизируются — фоновой процесс читает свою
++     * копию файла и может увидеть старые настройки. Поэтому действующий
++     * набор считает тот процесс, где человек нажал «Запустить» (главный), и
++     * передаёт его строкой в Intent.
++     *
++     * Формат простой (`id=значение` через `;`) и намеренно без JSON: строка
++     * читается глазами в логе, а разбор не может бросить исключение.
++     */
++    fun encode(values: Map<String, String>): String =
++        values.entries
++            .filter { it.value.isNotEmpty() }
++            .joinToString(";") { "${it.key}=${it.value}" }
++
++    /** Разобрать то, что вернул [encode]. Мусор пропускается, а не роняет запуск. */
++    fun decode(text: String): Map<String, String> {
++        if (text.isBlank()) return emptyMap()
++        val out = LinkedHashMap<String, String>()
++        text.split(';').forEach { pair ->
++            val cut = pair.indexOf('=')
++            if (cut <= 0) return@forEach
++            val key = pair.substring(0, cut).trim()
++            val value = pair.substring(cut + 1).trim()
++            if (key.isNotEmpty() && value.isNotEmpty()) out[key] = value
++        }
++        return out
++    }
++
++    /** Действующие значения всех полей — то, что реально уйдёт в ядро. */
++    fun effective(cfg: KenjiConfig): Map<String, String> =
++        FIELDS.associate { it.id to raw(cfg, it.id) }
++
++    const val PREFIX = "kenji."
++
++    /** Одно редактируемое поле второго ядра. */
++    data class Choice(val value: String, val label: String)
++
++    data class Field(
++        val id: String,
++        val label: String,
++        val hint: String,
++        /** true — значение по умолчанию берётся из Eden. */
++        val shared: Boolean,
++        val choices: List<Choice>
++    )
++
++    private fun bool(raw: String): Boolean? = when (raw.lowercase(Locale.ROOT)) {
++        "true", "1", "on", "вкл" -> true
++        "false", "0", "off", "выкл" -> false
++        else -> null
++    }
++
++    /**
++     * Поля экрана «Ядра».
++     *
++     * Порядок — по частоте: память и масштаб трогают чаще, чем анизотропию.
++     * `shared = true` значит «пока не тронуто, повторяет Eden»; такие поля
++     * помечены на экране, чтобы было видно связь.
++     */
++    val FIELDS: List<Field> = listOf(
++        Field(
++            "memory", "Память второго ядра",
++            "Сколько памяти разрешает себе Kenji. 4 ГБ — проверенное значение на 8 ГБ телефоне.",
++            false,
++            listOf(
++                Choice("2", "4 ГБ"),
++                Choice("3", "6 ГБ"),
++                Choice("0", "как на хосте"),
++                Choice("1", "2 ГБ")
++            )
++        ),
++        Field(
++            "scale", "Масштаб картинки",
++            "Общий с Eden: пока не тронуто, второй ядро рисует в том же масштабе.",
++            true,
++            listOf(
++                Choice("0.5", "0.5x"),
++                Choice("0.75", "0.75x"),
++                Choice("1", "1x"),
++                Choice("1.5", "1.5x")
++            )
++        ),
++        Field(
++            "nce", "NCE (нативный код)",
++            "Общее с Eden: берётся его CPU-бэкенд. На Mali NCE быстрее, но чаще падает.",
++            true,
++            listOf(Choice("false", "выкл · Dynarmic"), Choice("true", "вкл · NCE"))
++        ),
++        Field(
++            "docked", "Режим док",
++            "Общий с Eden: док — больше пикселей и памяти, на 8 ГБ обычно медленнее.",
++            true,
++            listOf(Choice("false", "выкл"), Choice("true", "вкл"))
++        ),
++        Field(
++            "shaderCache", "Кэш шейдеров",
++            "Общий с Eden: второй запуск игры не компилирует пайплайны заново.",
++            true,
++            listOf(Choice("true", "вкл"), Choice("false", "выкл"))
++        ),
++        Field(
++            "ptc", "PPTC (профиль кода)",
++            "Только у Kenji: сохраняет переведённый код между запусками.",
++            false,
++            listOf(Choice("true", "вкл"), Choice("false", "выкл"))
++        ),
++        Field(
++            "macroHle", "Macro HLE",
++            "Только у Kenji: заменяет частые вызовы системы своей реализацией.",
++            false,
++            listOf(Choice("true", "вкл"), Choice("false", "выкл"))
++        ),
++        Field(
++            "fastGpuTime", "Быстрое время GPU",
++            "Только у Kenji: меньше синхронизаций, возможны артефакты в редких играх.",
++            false,
++            listOf(Choice("true", "вкл"), Choice("false", "выкл"))
++        ),
++        Field(
++            "aniso", "Анизотропия",
++            "Только у Kenji. 0 — выключена: на Mali каждая ступень стоит кадров.",
++            false,
++            listOf(
++                Choice("0", "выкл"),
++                Choice("4", "4x"),
++                Choice("8", "8x"),
++                Choice("16", "16x")
++            )
++        ),
++        Field(
++            "vsync", "Вертикальная синхронизация",
++            "Только у Kenji. 0 — без ограничения кадров.",
++            false,
++            listOf(Choice("0", "выкл"), Choice("1", "вкл"))
++        ),
++        Field(
++            "internet", "Интернет в играх",
++            "Только у Kenji: без него онлайн-функции не работают, но и телеметрия молчит.",
++            false,
++            listOf(Choice("false", "выкл"), Choice("true", "вкл"))
++        ),
++        Field(
++            "integrity", "Проверка целостности",
++            "Только у Kenji. Выключена — быстрее запуск, как в проверенных настройках.",
++            false,
++            listOf(Choice("false", "выкл"), Choice("true", "вкл"))
++        )
++    )
++}
+diff --git a/patch/android/utils/EngineStore.kt b/patch/android/utils/EngineStore.kt
+new file mode 100644
+index 0000000..aae436c
+--- /dev/null
++++ b/patch/android/utils/EngineStore.kt
+@@ -0,0 +1,180 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++
++package org.yuzu.yuzu_emu.utils
++
++import android.content.Context
++
++/**
++ * Хранилище гибрида: настройки второго ядра и выбор ядра для каждой игры.
++ *
++ * WHY A SEPARATE STORE
++ *   Настройки Eden живут в его собственном конфиге через нативный код.
++ *   Писать туда чужие ключи нельзя: Eden прочитает их как свои и либо
++ *   проигнорирует, либо упадёт на разборе. Поэтому у второго ядра отдельный
++ *   файл, а «общность» получается не общим хранилищем, а чтением: значения
++ *   Eden подставляются в [EngineHybrid.merge] каждый раз при запуске.
++ *
++ *   Отсюда же следует главное свойство гибрида: переключение ядра ничего не
++ *   стирает. У Eden свой конфиг, у Kenji свой, а выбор ядра для игры — это
++ *   одна короткая запись, а не перезапись настроек.
++ */
++object EngineStore {
++
++    private const val FILE = "symbiosis_engine_hybrid"
++    private const val KEY_SCHEMA = "schema"
++    private const val KEY_PER_GAME = "game."
++    private const val KEY_PINNED = "kenji_pin."
++
++    private fun prefs(context: Context) =
++        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
++
++    /**
++     * Сохранённые значения второго ядра.
++     *
++     * Пустая карта при другой схеме — намеренно: старые ключи могут значить
++     * другое, и «прочитать как есть» хуже, чем начать с значений Eden.
++     */
++    fun stored(context: Context): Map<String, String> {
++        val p = prefs(context)
++        if (p.getInt(KEY_SCHEMA, 0) != EngineHybrid.VERSION) return emptyMap()
++        val out = LinkedHashMap<String, String>()
++        p.all().forEach { (key, value) ->
++            if (key.startsWith(EngineHybrid.PREFIX) && value is String) out[key] = value
++        }
++        return out
++    }
++
++    /** Настройки второго ядра, сведённые с Eden. */
++    fun config(context: Context): EngineHybrid.KenjiConfig =
++        EngineHybrid.merge(edenSnapshot(context), stored(context))
++
++    /**
++     * Конфиг с явно заданными значениями поверх Eden.
++     *
++     * Нужен процессу `:kenji`: он получает действующие значения строкой из
++     * главного процесса, потому что общее хранилище между процессами не
++     * синхронизируется.
++     */
++    fun configWith(context: Context, values: Map<String, String>): EngineHybrid.KenjiConfig {
++        val overrides = values.mapKeys { EngineHybrid.PREFIX + it.key }
++        return EngineHybrid.merge(edenSnapshot(context), overrides)
++    }
++
++    /** Действующий набор значений строкой — для передачи в :kenji. */
++    fun effectiveText(context: Context): String =
++        EngineHybrid.encode(EngineHybrid.effective(config(context)))
++
++    fun rows(context: Context): List<EngineHybrid.Row> =
++        EngineHybrid.rows(edenSnapshot(context), stored(context))
++
++    fun summary(context: Context): String = EngineHybrid.summary(config(context))
++
++    /**
++     * Записать одно поле второго ядра.
++     *
++     * Возвращает сообщение для человека, а не Boolean: нажатие на строку
++     * должно сказать, что стало, — экран не перерисовывается «сам собой».
++     */
++    fun setField(context: Context, id: String, raw: String): String {
++        val field = EngineHybrid.FIELDS.firstOrNull { it.id == id }
++            ?: return "нет настройки «$id»"
++        val cfg = config(context)
++        val next = EngineHybrid.apply(cfg, id, raw)
++            ?: return "значение «$raw» не подошло"
++        val p = prefs(context).edit()
++        p.putInt(KEY_SCHEMA, EngineHybrid.VERSION)
++        p.putString(EngineHybrid.PREFIX + id, raw)
++        p.putBoolean(KEY_PINNED + id, true)
++        p.apply()
++        return "${field.label}: ${EngineHybrid.label(next, id)} · своё"
++    }
++
++    /** Провернуть поле на следующее значение. */
++    fun cycleField(context: Context, id: String): String {
++        val cfg = config(context)
++        return setField(context, id, EngineHybrid.next(cfg, id))
++    }
++
++    /** Вернуть все настройки второго ядра к значениям Eden. */
++    fun resetFields(context: Context): String {
++        val p = prefs(context).edit()
++        stored(context).keys.forEach { p.remove(it) }
++        p.putInt(KEY_SCHEMA, EngineHybrid.VERSION)
++        p.apply()
++        return "настройки второго ядра снова повторяют Eden"
++    }
++
++    /** Тронуто ли поле руками (значит, Eden его больше не перекрывает). */
++    fun pinned(context: Context, id: String): Boolean =
++        prefs(context).getBoolean(KEY_PINNED + id, false)
++
++    // ── ядро на игру ────────────────────────────────────────────────────
++
++    /** Ядро, которым запустится эта игра: своё значение важнее общего. */
++    fun coreFor(context: Context, path: String): EngineHybrid.Core {
++        val key = EngineHybrid.gameKey(path)
++        val perGame = if (key.isEmpty()) null else prefs(context).getString(KEY_PER_GAME + key, null)
++        return EngineHybrid.coreFor(globalCore(context).id, perGame)
++    }
++
++    fun perGame(context: Context, path: String): EngineHybrid.Core? {
++        val key = EngineHybrid.gameKey(path)
++        if (key.isEmpty()) return null
++        val raw = prefs(context).getString(KEY_PER_GAME + key, null) ?: return null
++        return EngineHybrid.Core.of(raw)
++    }
++
++    fun setCoreFor(context: Context, path: String, core: EngineHybrid.Core) {
++        val key = EngineHybrid.gameKey(path)
++        if (key.isEmpty()) return
++        prefs(context).edit().putString(KEY_PER_GAME + key, core.id).apply()
++    }
++
++    /** Убрать выбор ядра у игры: снова действует общее значение. */
++    fun clearCoreFor(context: Context, path: String) {
++        val key = EngineHybrid.gameKey(path)
++        if (key.isEmpty()) return
++        prefs(context).edit().remove(KEY_PER_GAME + key).apply()
++    }
++
++    /** Ядро по умолчанию — то, что выбрано на экране ядер. */
++    fun globalCore(context: Context): EngineHybrid.Core =
++        EngineHybrid.Core.of(EnginePreference.selectedRaw(context).id)
++
++    fun setGlobalCore(context: Context, core: EngineHybrid.Core) {
++        val engine = EngineLoader.Engine.values().firstOrNull { it.id == core.id }
++            ?: EngineLoader.Engine.EDEN
++        EnginePreference.select(context, engine)
++    }
++
++    /**
++     * Что у Eden можно прочитать и передать второму ядру.
++     *
++     * Чтение идёт рефлексией через [LauncherSettings] и не бросает: если
++     * настройка не нашлась (другая версия ядра, ещё не загружен конфиг),
++     * остаётся значение по умолчанию, а не падение на старте.
++     */
++    fun edenSnapshot(context: Context): EngineHybrid.EdenSnapshot =
++        EngineHybrid.EdenSnapshot(
++            resolutionScale = runCatching { LauncherSettings.edenResolutionScale() }.getOrDefault(1f),
++            docked = LauncherSettings.edenBool("USE_DOCKED_MODE") ?: false,
++            shaderCache = LauncherSettings.edenBool("RENDERER_USE_DISK_SHADER_CACHE") ?: true,
++            nce = runCatching { LauncherSettings.cpuBackend() == 1 }.getOrDefault(false),
++            ramGb = totalRamGb(),
++            language = 1,
++            region = 1
++        )
++
++    /** Сколько памяти у телефона — от этого зависит режим памяти Kenji. */
++    fun totalRamGb(): Int {
++        val kb = runCatching {
++            java.io.File("/proc/meminfo").useLines { lines ->
++                lines.firstOrNull { it.startsWith("MemTotal:") }
++                    ?.trim()?.split(Regex("\\s+"))?.getOrNull(1)?.toLongOrNull()
++            }
++        }.getOrNull() ?: 0L
++        if (kb <= 0L) return 8
++        return (kb / 1024 / 1024).toInt().coerceAtLeast(1)
 +    }
 +}
 diff --git a/patch/android/utils/GameFolderScanner.kt b/patch/android/utils/GameFolderScanner.kt
@@ -3064,6 +4364,158 @@ index 8bb8f25..fc5bd4d 100644
                      .putLong(newGame.keyAddedToLibraryTime, System.currentTimeMillis())
                      .apply()
              }
+diff --git a/patch/android/utils/KenjiBridge.kt b/patch/android/utils/KenjiBridge.kt
+index 98dae39..8a827a9 100644
+--- a/patch/android/utils/KenjiBridge.kt
++++ b/patch/android/utils/KenjiBridge.kt
+@@ -195,44 +195,80 @@ object KenjiBridge {
+         }
+     }
+ 
+-    /** Prepare device + graphics. Surface and ROM come next. */
+-    fun preparePlay(context: Context): Status {
++    /**
++     * Prepare device + graphics. Surface and ROM come next.
++     *
++     * ЗДЕСЬ БЫЛО ВПИСАНО ЧИСЛАМИ. Настройки второго ядра не влияли ни на что:
++     * `memoryManagerMode = 2`, `useNce = false`, `resScale = 1f` и остальные
++     * значения стояли прямо в коде, а экран ядер показывал переключатели,
++     * которые никуда не доезжали. Из-за этого «два ядра в одном» работали
++     * как два разных приложения: настроил масштаб у Eden — Kenji рисует по
++     * своему.
++     *
++     * Теперь аргументы приходят из [EngineStore.config]: свои значения
++     * второго ядра плюс всё, что не тронуто, взятое у Eden.
++     * `EngineHybrid.seed/merge` решает, что откуда, и это проверяется на
++     * хосте, а не на телефоне.
++     */
++    fun preparePlay(context: Context, effective: String = ""): Status {
+         seedKeys(context)
+         val started = start(context)
+         if (!started.ok) return started
+-        // Same knobs as official Kenji on this phone: 4 GiB, Host Unchecked,
+-        // NCE off, PPTC on, integrity off.
++
++        // Настройки приходят строкой из главного процесса: SharedPreferences
++        // между процессами не синхронизируются, и :kenji увидел бы свою
++        // копию файла. Пустая строка — читаем локально (проверка ядра).
++        val cfg = if (effective.isBlank()) {
++            EngineStore.config(context)
++        } else {
++            EngineStore.configWith(context, EngineHybrid.decode(effective))
++        }
++
+         nativeDeviceInit(
+-            memoryManagerMode = 2,
+-            useNce = false,
+-            memoryConfiguration = 0,
+-            systemLanguage = 1,
+-            regionCode = 1,
+-            vSyncMode = 0,
+-            enableDockedMode = false,
+-            enablePtc = true,
+-            enableLowPowerPtc = false,
+-            enableJitCacheEviction = false,
+-            enableInternetAccess = false,
+-            enableFsIntegrityChecks = false,
+-            fsGlobalAccessLogMode = 0,
+-            timeZone = "UTC",
+-            ignoreMissingServices = false
++            memoryManagerMode = cfg.memoryManagerMode,
++            useNce = cfg.useNce,
++            memoryConfiguration = cfg.memoryConfiguration,
++            systemLanguage = cfg.systemLanguage,
++            regionCode = cfg.regionCode,
++            vSyncMode = cfg.vSyncMode,
++            enableDockedMode = cfg.enableDockedMode,
++            enablePtc = cfg.enablePtc,
++            enableLowPowerPtc = cfg.enableLowPowerPtc,
++            enableJitCacheEviction = cfg.enableJitCacheEviction,
++            enableInternetAccess = cfg.enableInternetAccess,
++            enableFsIntegrityChecks = cfg.enableFsIntegrityChecks,
++            fsGlobalAccessLogMode = cfg.fsGlobalAccessLogMode,
++            timeZone = cfg.timeZone,
++            ignoreMissingServices = cfg.ignoreMissingServices
+         ).takeIf { it.isNotEmpty() }?.let { return Status(false, it, started.symbols) }
++
+         nativeGraphicsInit(
+-            resScale = 1f,
+-            maxAnisotropy = 0f,
+-            fastGpuTime = true,
+-            fast2DCopy = true,
+-            enableMacroJit = false,
+-            enableMacroHLE = true,
+-            enableShaderCache = true,
+-            enableTextureRecompression = false,
+-            backendThreading = 1
++            resScale = cfg.resScale,
++            maxAnisotropy = cfg.maxAnisotropy,
++            fastGpuTime = cfg.fastGpuTime,
++            fast2DCopy = cfg.fast2DCopy,
++            enableMacroJit = cfg.enableMacroJit,
++            enableMacroHLE = cfg.enableMacroHLE,
++            enableShaderCache = cfg.enableShaderCache,
++            enableTextureRecompression = cfg.enableTextureRecompression,
++            backendThreading = cfg.backendThreading
+         ).takeIf { it.isNotEmpty() }?.let { return Status(false, it, started.symbols) }
+-        return Status(true, "плеер второго ядра готов", started.symbols)
++
++        lastConfig = EngineHybrid.summary(cfg)
++        return Status(true, "плеер второго ядра готов · " + lastConfig, started.symbols)
+     }
+ 
++    /**
++     * С какими настройками стартовал плеер.
++     *
++     * Показывается в статусе [org.yuzu.yuzu_emu.activities.KenjiPlayerActivity]
++     * и в отчёте: «ядро запустилось» без указания настроек ничего не
++     * доказывает, а именно их раньше и не было.
++     */
++    @Volatile
++    var lastConfig: String = ""
++        private set
++
+     fun attachSurface(surface: android.view.Surface, width: Int, height: Int): Status {
+         ensureBridge()?.let { return Status(false, it) }
+         val err = runCatching { nativeAttachSurface(surface, width, height) }
+diff --git a/patch/android/utils/LauncherSettings.kt b/patch/android/utils/LauncherSettings.kt
+index 8afeedc..778fc8e 100644
+--- a/patch/android/utils/LauncherSettings.kt
++++ b/patch/android/utils/LauncherSettings.kt
+@@ -138,6 +138,33 @@ object LauncherSettings {
+ 
+     fun cpuBackend(): Int = readInt("CPU_BACKEND")
+ 
++    /**
++     * Настройки Eden для гибрида: одно и то же чтение, но наружу.
++     *
++     * Второе ядро берёт масштаб, док, кэш шейдеров и CPU-бэкенд из Eden
++     * (см. `EngineHybrid.seed`), поэтому ему нужен доступ к тем же ключам.
++     * null значит «ключ не прочитался» — вызывающий оставляет своё значение,
++     * а не подставляет ложь.
++     */
++    internal fun edenBool(key: String): Boolean? = readBool(key)
++
++    /**
++     * Масштаб Eden числом, а не индексом: индекс 3 — это `1x`, и путать
++     * индекс с множителем в чужом ядре нельзя, там масштаб дробный.
++     */
++    internal fun edenResolutionScale(): Float = when (readInt("RENDERER_RESOLUTION")) {
++        0 -> 0.25f
++        1 -> 0.5f
++        2 -> 0.75f
++        3 -> 1f
++        4 -> 1.25f
++        5 -> 1.5f
++        6 -> 2f
++        7 -> 3f
++        8 -> 4f
++        else -> 1f
++    }
++
+     fun cpuLabel(index: Int): String = when (index) {
+         1 -> "NCE"
+         0 -> "Dynarmic"
 diff --git a/patch/android/utils/LibraryIndex.kt b/patch/android/utils/LibraryIndex.kt
 new file mode 100644
 index 0000000..49baed6
@@ -3555,10 +5007,10 @@ index 97a5546..ac772f0 100644
      fun memoryJson(): String = runCatching {
 diff --git a/patch/android/utils/Manual.kt b/patch/android/utils/Manual.kt
 new file mode 100644
-index 0000000..84fdeb6
+index 0000000..490ac6b
 --- /dev/null
 +++ b/patch/android/utils/Manual.kt
-@@ -0,0 +1,268 @@
+@@ -0,0 +1,305 @@
 +// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
 +// SPDX-License-Identifier: GPL-3.0-or-later
 +
@@ -3626,7 +5078,7 @@ index 0000000..84fdeb6
 +     * шапке видно, что человек читает новую инструкцию, а не ту, что была
 +     * в APK полугодовой давности.
 +     */
-+    const val VERSION = 1
++    const val VERSION = 2
 +
 +    /** Все разделы в том порядке, в каком их читают. */
 +    val sections: List<Section> = listOf(
@@ -3728,10 +5180,15 @@ index 0000000..84fdeb6
 +                Step("Ключи", "prod.keys и файлы прошивки консоли. Без них заголовки дампов не расшифровываются."),
 +                Step(
 +                    "Инструменты",
-+                    "Всё остальное: подбор FPS, диагностика, движки, утилиты ROM, сейвы, " +
++                    "Всё остальное: подбор FPS, диагностика, два ядра, утилиты ROM, сейвы, " +
 +                        "лаунчеры, справочник настроек."
 +                ),
-+                Step("Руководство (этот экран)", "Инструкция, которую вы читаете; сверху - поиск по ней."),
++                Step(
++                    "Два ядра",
++                    "Гибрид: Eden и Kenji-NX в одном приложении, у каждого свои настройки. " +
++                        "Здесь же ядро по умолчанию."
++                ),
++                Step("Руководство (этот экран)", "Инструкция, которую вы читаете; сверху — поиск по ней."),
 +                Step(
 +                    "Расширенная панель",
 +                    "Старая универсальная панель: пространства, выбор ядра, тонкие " +
@@ -3739,6 +5196,38 @@ index 0000000..84fdeb6
 +                )
 +            ),
 +            actions = listOf(Action("Открыть инструменты", Go.TOOLS))
++        ),
++        Section(
++            id = "cores",
++            title = "Два ядра: гибрид",
++            intro = "В приложении два ядра — Eden и Kenji-NX. Где одно падает, другое иногда " +
++                "едет, поэтому ядро выбирается не на всё приложение, а на игру.",
++            steps = listOf(
++                Step(
++                    "Выбрать ядро для игры",
++                    "Долгое нажатие на плитке в библиотеке → «Запустить на Eden» или " +
++                        "«Запустить на Kenji-NX». Выбор запомнится за этой игрой, а пометка " +
++                        "«kenji» на плитке покажет, каким ядром она пойдёт."
++                ),
++                Step(
++                    "Скачать второе ядро",
++                    "«Инструменты» → «Два ядра» → «Скачать», около 55 МБ один раз. Игры, сейвы " +
++                        "и ключи общие: скачивается только ядро, библиотеку заново не собираете."
++                ),
++                Step(
++                    "Как связаны настройки",
++                    "Общие строки — масштаб, док, кэш шейдеров, NCE — второй ядро берёт у Eden, " +
++                        "пока вы не измените их на экране «Два ядра». Свои — память, PPTC, " +
++                        "macro HLE, анизотропия, интернет — принадлежат только ему, и Eden их " +
++                        "не перетирает."
++                ),
++                Step(
++                    "Если второе ядро не скачано",
++                    "Игра всё равно запустится — на Eden, и приложение скажет, почему не на том " +
++                        "ядре. Молча запускать не то хуже, чем сказать."
++                )
++            ),
++            actions = listOf(Action("Открыть два ядра", Go.ENGINES))
 +        ),
 +        Section(
 +            id = "speed",
@@ -3795,11 +5284,11 @@ index 0000000..84fdeb6
 +                Step("Чёрный экран или вылет", "«Инструменты» → «Диагностика» → отчёт о запуске: видно, что ядро приняло, а что выбросило."),
 +                Step(
 +                    "Одна игра идёт, другая нет",
-+                    "«Инструменты» → «Движки»: переключите Eden на Kenji-NX. Игра, которая " +
-+                        "не идёт на одном, иногда идёт на другом."
++                    "«Инструменты» → «Два ядра»: переключите игру на Kenji-NX долгим нажатием " +
++                        "на плитке. Игра, которая не идёт на одном, иногда идёт на другом."
 +                )
 +            ),
-+            actions = listOf(Action("Диагностика", Go.DIAGNOSTICS), Action("Движки", Go.ENGINES))
++            actions = listOf(Action("Диагностика", Go.DIAGNOSTICS), Action("Открыть два ядра", Go.ENGINES))
 +        )
 +    )
 +
@@ -3829,10 +5318,10 @@ index 0000000..84fdeb6
 +}
 diff --git a/patch/android/utils/NativeLibraryPresenter.kt b/patch/android/utils/NativeLibraryPresenter.kt
 new file mode 100644
-index 0000000..ae1ab57
+index 0000000..4d339ae
 --- /dev/null
 +++ b/patch/android/utils/NativeLibraryPresenter.kt
-@@ -0,0 +1,276 @@
+@@ -0,0 +1,300 @@
 +// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
 +// SPDX-License-Identifier: GPL-3.0-or-later
 +
@@ -3877,7 +5366,15 @@ index 0000000..ae1ab57
 +        val developer: String = "",
 +        val fileName: String = "",
 +        val hasSave: Boolean = false,
-+        val saveSize: String = ""
++        val saveSize: String = "",
++        /**
++         * Ядро, которым запустится игра: `kenji` или пусто (Eden).
++         *
++         * Библиотека одна, ядер два. Пометка нужна, чтобы выбор был виден
++         * до нажатия: иначе «я переключил ядро» и «эта игра всё равно
++         * запустилась не тем» выглядят одинаково.
++         */
++        val core: String = ""
 +    )
 +
 +    /** Файл, который виден, но не запускается. */
@@ -3902,6 +5399,8 @@ index 0000000..ae1ab57
 +        val path: String,
 +        val action: Action,
 +        val runnable: Boolean,
++        /** `kenji`, если игра пойдёт на втором ядре; пусто для Eden. */
++        val core: String = "",
 +        /** Индекс в исходном списке игр, -1 для файлов из [Side]. */
 +        val gameIndex: Int = -1
 +    )
@@ -3949,6 +5448,7 @@ index 0000000..ae1ab57
 +                path = row.path,
 +                action = Action.LAUNCH,
 +                runnable = true,
++                core = row.core,
 +                gameIndex = index
 +            )
 +        }
@@ -3984,9 +5484,11 @@ index 0000000..ae1ab57
 +        val split = side.count { it.kind == "split" }
 +        val gamesCount = games.size
 +
++        val onKenji = games.count { it.core == "kenji" }
++
 +        return Model(
 +            items = all,
-+            summary = summaryLine(gamesCount, updates, dlc, compressed, unreadable + split),
++            summary = summaryLine(gamesCount, updates, dlc, compressed, unreadable + split, onKenji),
 +            emptyReason = emptyReason(gamesCount, compressed, unreadable + split, games.size + side.size),
 +            games = gamesCount,
 +            updates = updates,
@@ -4038,9 +5540,20 @@ index 0000000..ae1ab57
 +     * Считает слова правильно: «1 игра», «2 игры», «5 игр». Раньше панель
 +     * писала «1 сжатых» и «3 файлов», и это читалось как ошибка.
 +     */
-+    fun summaryLine(games: Int, updates: Int, dlc: Int, compressed: Int, broken: Int): String {
++    fun summaryLine(
++        games: Int,
++        updates: Int,
++        dlc: Int,
++        compressed: Int,
++        broken: Int,
++        onSecondCore: Int = 0
++    ): String {
 +        val parts = mutableListOf<String>()
 +        parts.add("$games ${plural(games, "игра", "игры", "игр")}")
++        if (onSecondCore > 0) {
++            // Сколько игр уйдёт на второе ядро — до нажатия, а не после.
++            parts.add("$onSecondCore ${plural(onSecondCore, "на Kenji-NX", "на Kenji-NX", "на Kenji-NX")}")
++        }
 +        if (updates > 0) parts.add("$updates ${plural(updates, "обновление", "обновления", "обновлений")}")
 +        if (dlc > 0) parts.add("$dlc DLC")
 +        if (compressed > 0) {
@@ -4110,11 +5623,17 @@ index 0000000..ae1ab57
 +        }
 +}
 diff --git a/patch/android/values/strings-en.xml b/patch/android/values/strings-en.xml
-index 1285646..fb53b61 100644
+index 1285646..d9ada13 100644
 --- a/patch/android/values/strings-en.xml
 +++ b/patch/android/values/strings-en.xml
-@@ -2116,4 +2116,40 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-     <string name="engine_choice_description">Eden or Kenji-NX. A game that stalls on one sometimes runs on the other.</string>
+@@ -2112,8 +2112,55 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+     <string name="status_storage_manual">Open Settings, Apps, Special app access, All files access</string>
+     <string name="folder_launch_failed">Could not open the game file</string>
+     <string name="folder_launch_unreadable">The file cannot be read - check keys and firmware</string>
+-    <string name="engine_choice">Emulation engine</string>
+-    <string name="engine_choice_description">Eden or Kenji-NX. A game that stalls on one sometimes runs on the other.</string>
++    
++    
      <string name="live_panel">Panel</string>
      <string name="live_panel_description">Status, folders and files. Updates itself, no reinstall</string>
 +
@@ -4153,13 +5672,30 @@ index 1285646..fb53b61 100644
 +    <string name="live_panel_extended">Advanced panel</string>
 +    <string name="live_panel_extended_description">The rare things in one place: spaces, engine choice, fine-grained toggles</string>
 +
++    <!-- Hybrid: two cores in one app -->
++    <string name="engine_choice">Two cores (hybrid)</string>
++    <string name="engine_choice_description">Eden and Kenji-NX in one app: each keeps its own settings, the core is chosen per game</string>
++    <string name="launcher_core_eden">Run on Eden</string>
++    <string name="launcher_core_kenji">Run on Kenji-NX</string>
++    <string name="launcher_properties">Game properties</string>
++    <string name="launcher_core_now">This game currently runs on: %1$s. The choice is remembered for it.</string>
++    <string name="launcher_core_kenji_missing">The second core is not downloaded - starting on Eden. Get it in Tools -> Two cores</string>
++    <string name="launcher_core_kenji_broken">The second core is unusable (%1$s) - starting on Eden</string>
++    <string name="launcher_core_kenji_failed">The second core did not open - starting on Eden</string>
++
  </resources>
 diff --git a/patch/android/values/strings-ru.xml b/patch/android/values/strings-ru.xml
-index 4d3e0b3..85c363b 100644
+index 4d3e0b3..97d55a8 100644
 --- a/patch/android/values/strings-ru.xml
 +++ b/patch/android/values/strings-ru.xml
-@@ -1449,4 +1449,40 @@
-     <string name="engine_choice_description">Eden или Kenji-NX. Игра, которая не идёт на одном, иногда идёт на другом.</string>
+@@ -1445,8 +1445,55 @@
+     <string name="status_storage_manual">Откройте: Настройки → Приложения → Специальный доступ → Доступ ко всем файлам</string>
+     <string name="folder_launch_failed">Не удалось открыть файл игры</string>
+     <string name="folder_launch_unreadable">Файл не читается — проверь ключи и прошивку</string>
+-    <string name="engine_choice">Движок эмуляции</string>
+-    <string name="engine_choice_description">Eden или Kenji-NX. Игра, которая не идёт на одном, иногда идёт на другом.</string>
++    
++    
      <string name="live_panel">Панель</string>
      <string name="live_panel_description">Состояние, папки и файлы. Обновляется сама, без переустановки</string>
 +
@@ -4198,7 +5734,264 @@ index 4d3e0b3..85c363b 100644
 +    <string name="live_panel_extended">Расширенная панель</string>
 +    <string name="live_panel_extended_description">Всё редкое в одном месте: пространства, выбор ядра, тонкие переключатели</string>
 +
++    <!-- Гибрид: два ядра в одном -->
++    <string name="engine_choice">Два ядра (гибрид)</string>
++    <string name="engine_choice_description">Eden и Kenji-NX в одном приложении: у каждого свои настройки, ядро выбирается на игру</string>
++    <string name="launcher_core_eden">Запустить на Eden</string>
++    <string name="launcher_core_kenji">Запустить на Kenji-NX</string>
++    <string name="launcher_properties">Свойства игры</string>
++    <string name="launcher_core_now">Сейчас эта игра запускается на: %1$s. Выбор запомнится за ней.</string>
++    <string name="launcher_core_kenji_missing">Второе ядро не скачано — запускаю на Eden. Скачать: «Инструменты» → «Два ядра»</string>
++    <string name="launcher_core_kenji_broken">Второе ядро непригодно (%1$s) — запускаю на Eden</string>
++    <string name="launcher_core_kenji_failed">Второе ядро не открылось — запускаю на Eden</string>
++
  </resources>
+diff --git a/tests/EngineHybridTest.kt b/tests/EngineHybridTest.kt
+new file mode 100644
+index 0000000..3d52baf
+--- /dev/null
++++ b/tests/EngineHybridTest.kt
+@@ -0,0 +1,240 @@
++// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
++// SPDX-License-Identifier: GPL-3.0-or-later
++//
++// Гибрид: два ядра, одни настройки на двоих.
++//
++// Проверяется [EngineHybrid] — там решается, что из настроек Eden поедет во
++// второе ядро, что останется своим и каким ядром запустится конкретная игра.
++// Экран только рисует результат, а `KenjiBridge` подставляет его в нативные
++// вызовы, поэтому тест читает и тот, и другой файл: логика без проводки до
++// ядра бесполезна, и именно это было сломано (настройки стояли числами в
++// коде).
++//
++// Run: kotlinc tests/EngineHybridTest.kt patch/android/utils/EngineHybrid.kt \
++//        -include-runtime -d /tmp/eh.jar && java -jar /tmp/eh.jar
++
++import java.io.File
++import org.yuzu.yuzu_emu.utils.EngineHybrid
++import org.yuzu.yuzu_emu.utils.EngineHybrid.Core
++import org.yuzu.yuzu_emu.utils.EngineHybrid.Source
++
++private var passed = 0
++private var failed = 0
++private val failures = mutableListOf<String>()
++
++private fun check(name: String, ok: Boolean, detail: String = "") {
++    if (ok) {
++        passed++
++        println("  ok    $name${if (detail.isEmpty()) "" else "   [$detail]"}")
++    } else {
++        failed++
++        failures += name
++        println("  FAIL  $name${if (detail.isEmpty()) "" else "   [$detail]"}")
++    }
++}
++
++private fun eq(name: String, actual: Any?, expected: Any?) =
++    check(name, actual == expected, "получено $actual, ожидалось $expected")
++
++fun main() {
++    println("EngineHybrid — два ядра в одном")
++
++    val eden = EngineHybrid.EdenSnapshot(
++        resolutionScale = 0.75f,
++        docked = false,
++        shaderCache = true,
++        nce = false,
++        ramGb = 8,
++        language = 2,
++        region = 2
++    )
++
++    // ── 1. общие настройки берутся у Eden ───────────────────────────────
++    val seeded = EngineHybrid.seed(eden)
++    eq("масштаб пришёл из Eden", EngineHybrid.trimFloat(seeded.resScale), "0.75")
++    eq("док пришёл из Eden", seeded.enableDockedMode, false)
++    eq("кэш шейдеров пришёл из Eden", seeded.enableShaderCache, true)
++    eq("NCE пришёл из Eden", seeded.useNce, false)
++    eq("язык пришёл из Eden", seeded.systemLanguage, 2)
++    eq("память на 8 ГБ — 4 ГБ", seeded.memoryManagerMode, 2)
++    check("PPTC остаётся своим (включён)", seeded.enablePtc)
++    check("macro HLE остаётся своим (включён)", seeded.enableMacroHLE)
++    eq(
++        "на 12 ГБ памяти ядро получает 6 ГБ",
++        EngineHybrid.seed(eden.copy(ramGb = 12)).memoryManagerMode,
++        3
++    )
++    eq("масштаб ниже 0.25 зажимается", EngineHybrid.trimFloat(EngineHybrid.seed(eden.copy(resolutionScale = 0.1f)).resScale), "0.25")
++    eq("масштаб выше 4 зажимается", EngineHybrid.trimFloat(EngineHybrid.seed(eden.copy(resolutionScale = 9f)).resScale), "4")
++
++    // ── 2. своё значение перекрывает только своё поле ────────────────────
++    val withOwn = EngineHybrid.merge(eden, mapOf("kenji.memory" to "3", "kenji.macroHle" to "false"))
++    eq("своя память победила", withOwn.memoryManagerMode, 3)
++    check("свой macro HLE победил", !withOwn.enableMacroHLE)
++    eq("масштаб всё ещё из Eden", EngineHybrid.trimFloat(withOwn.resScale), "0.75")
++    check("PPTC не тронут", withOwn.enablePtc)
++
++    val scaleOwn = EngineHybrid.merge(eden, mapOf("kenji.scale" to "1.5"))
++    eq("свой масштаб у второго ядра", EngineHybrid.trimFloat(scaleOwn.resScale), "1.5")
++    eq(
++        "и Eden при этом не изменился",
++        EngineHybrid.trimFloat(EngineHybrid.seed(eden).resScale),
++        "0.75"
++    )
++
++    // ── 3. мусор в хранилище не ломает запуск ───────────────────────────
++    val junk = EngineHybrid.merge(
++        eden,
++        mapOf(
++            "kenji.memory" to "восемь",
++            "kenji.scale" to "2147483000",
++            "kenji.nce" to "может быть",
++            "kenji.такого нет" to "1"
++        )
++    )
++    eq("мусор в памяти → значение Eden", junk.memoryManagerMode, 2)
++    eq("мусор в масштабе → значение Eden", EngineHybrid.trimFloat(junk.resScale), "0.75")
++    check("мусор в NCE → значение Eden", !junk.useNce)
++    check("неизвестный ключ молча пропущен", EngineHybrid.apply(seeded, "kenji.foo", "1") == null)
++
++    // ── 4. каждое значение из списка полей применимо ────────────────────
++    var choicesChecked = 0
++    EngineHybrid.FIELDS.forEach { field ->
++        check("у поля «${field.label}» есть варианты", field.choices.size >= 2)
++        field.choices.forEach { choice ->
++            val applied = EngineHybrid.apply(seeded, field.id, choice.value)
++            check(
++                "вариант «${choice.label}» применяется",
++                applied != null && EngineHybrid.raw(applied, field.id) == choice.value,
++                "${field.id}=${choice.value}"
++            )
++            choicesChecked++
++        }
++    }
++    check("проверено вариантов", choicesChecked >= 20, "$choicesChecked")
++    val ids = EngineHybrid.FIELDS.map { it.id }
++    check("id полей уникальны", ids.size == ids.toSet().size)
++    check("подпись текущего значения находится", EngineHybrid.label(seeded, "scale") == "0.75x")
++
++    // ── 5. переключение по кругу не застревает ──────────────────────────
++    var cfg = seeded
++    val seen = mutableSetOf<String>()
++    repeat(EngineHybrid.FIELDS.first { it.id == "memory" }.choices.size) {
++        val next = EngineHybrid.next(cfg, "memory")
++        seen += next
++        cfg = EngineHybrid.apply(cfg, "memory", next) ?: cfg
++    }
++    eq(
++        "круг по памяти обошёл все варианты",
++        seen.size,
++        EngineHybrid.FIELDS.first { it.id == "memory" }.choices.size
++    )
++
++    // ── 6. строки «что куда поедет» ─────────────────────────────────────
++    val rows = EngineHybrid.rows(eden, mapOf("kenji.memory" to "3"))
++    val memory = rows.first { it.id == "memory" }
++    eq("своя память помечена как своё", memory.source, Source.OWN)
++    eq("память 6 ГБ", memory.value, "6 ГБ")
++    val scale = rows.first { it.id == "scale" }
++    eq("масштаб помечен как из Eden", scale.source, Source.EDEN)
++    check("в списке есть и общие, и свои строки", rows.any { it.source == Source.EDEN } && rows.any { it.source == Source.OWN })
++    eq("строк столько же, сколько полей", rows.size, EngineHybrid.FIELDS.size)
++
++    // ── 7. ядро на игру ────────────────────────────────────────────────
++    eq("по умолчанию Eden", EngineHybrid.coreFor("eden", null), Core.EDEN)
++    eq("игра переопределила на Kenji", EngineHybrid.coreFor("eden", "kenji"), Core.KENJI)
++    eq("игра вернулась на Eden", EngineHybrid.coreFor("kenji", "eden"), Core.EDEN)
++    eq("без своего значения — общее", EngineHybrid.coreFor("kenji", null), Core.KENJI)
++    eq("мусор в значении — Eden", EngineHybrid.coreFor("eden", "quake"), Core.EDEN)
++    check("ключи игр различаются", EngineHybrid.gameKey("content://a/Game 1.nsp") != EngineHybrid.gameKey("content://a/Game 2.nsp"))
++    eq("ключ игры стабилен", EngineHybrid.gameKey("content://a/x.nsp"), EngineHybrid.gameKey("content://a/x.nsp"))
++    eq("длина ключа игры", EngineHybrid.gameKey("content://a/x.nsp").length, 16)
++    eq("пустой путь — пустой ключ", EngineHybrid.gameKey(""), "")
++
++    // ── 8. сводка для человека ──────────────────────────────────────────
++    val summary = EngineHybrid.summary(withOwn)
++    check("сводка называет масштаб", summary.contains("масштаб"), summary)
++    check("сводка называет память", summary.contains("6 ГБ"), summary)
++    check("сводка называет NCE", summary.contains("NCE"), summary)
++
++    // ── 8b. передача настроек в процесс :kenji ──────────────────────────
++    val eff = EngineHybrid.effective(withOwn)
++    eq("в наборе все поля", eff.size, EngineHybrid.FIELDS.size)
++    val encoded = EngineHybrid.encode(eff)
++    check("строка настроек компактна", encoded.length < 400, "${encoded.length} символов")
++    val decoded = EngineHybrid.decode(encoded)
++    eq("разбор вернул столько же полей", decoded.size, eff.size)
++    eq("память пережила передачу", decoded["memory"], "3")
++    eq(
++        "и конфиг из переданного набора совпадает",
++        EngineHybrid.merge(eden, decoded.mapKeys { "kenji." + it.key }).memoryManagerMode,
++        withOwn.memoryManagerMode
++    )
++    eq("мусор в строке пропускается", EngineHybrid.decode("мусор;=;a=;b=1").size, 1)
++    eq("пустая строка — пустой набор", EngineHybrid.decode("").size, 0)
++
++    // ── 9. проводка до ядра, а не только логика ─────────────────────────
++    val root = File(".").absoluteFile
++    if (File(root, "patch/android").isDirectory) {
++        val bridge = File(root, "patch/android/utils/KenjiBridge.kt")
++        if (bridge.isFile) {
++            val src = bridge.readText()
++            check("мост берёт настройки из хранилища", src.contains("EngineStore.config(context)"))
++            val body = src.substringAfter("fun preparePlay", "").substringBefore("fun attachSurface")
++            check(
++                "мост больше не вписывает значения числами",
++                !body.contains("memoryManagerMode = 2") && !body.contains("resScale = 1f"),
++                body.take(120)
++            )
++            check(
++                "каждое поле конфига доезжает до nativeDeviceInit",
++                body.contains("cfg.memoryManagerMode") && body.contains("cfg.enablePtc") &&
++                    body.contains("cfg.resScale") && body.contains("cfg.enableMacroHLE")
++            )
++        } else {
++            check("мост второго ядра существует", false)
++        }
++
++        val launcher = File(root, "patch/android/fragments/NativeLauncherFragment.kt")
++        if (launcher.isFile) {
++            val src = launcher.readText()
++            check("лаунчер спрашивает ядро у хранилища", src.contains("EngineStore.coreFor"))
++            check("лаунчер умеет открыть второе ядро", src.contains("KenjiPlayerActivity.intent"))
++            check("выбор ядра запоминается за игрой", src.contains("EngineStore.setCoreFor"))
++        }
++
++        val engines = File(root, "patch/android/fragments/EnginesFragment.kt")
++        if (engines.isFile) {
++            val src = engines.readText()
++            check("экран ядер показывает связь настроек", src.contains("EngineStore.rows"))
++            check("настройку можно переключить", src.contains("EngineStore.cycleField"))
++            check("значения Eden возвращаются кнопкой", src.contains("EngineStore.resetFields"))
++            check("экран называет оба ядра сразу", src.contains("EngineLoader.Engine.values()"))
++        }
++
++        val manual = File(root, "patch/android/utils/Manual.kt")
++        if (manual.isFile) {
++            check(
++                "в руководстве есть раздел про два ядра",
++                manual.readText().contains("id = \"cores\"")
++            )
++        }
++
++        val store = File(root, "patch/android/utils/EngineStore.kt")
++        if (store.isFile) {
++            check(
++                "схема хранения проверяется",
++                store.readText().contains("EngineHybrid.VERSION")
++            )
++        }
++    } else {
++        println("  note  дерево patch/ рядом не найдено — проверка дрейфа пропущена")
++    }
++
++    println()
++    println("passed=$passed failed=$failed")
++    if (failed > 0) {
++        println("failing: ${failures.joinToString(", ")}")
++        kotlin.system.exitProcess(1)
++    }
++}
 diff --git a/tests/LibraryIndexTest.kt b/tests/LibraryIndexTest.kt
 new file mode 100644
 index 0000000..1420806
@@ -4410,10 +6203,10 @@ index 0000000..1420806
 +}
 diff --git a/tests/NativeLibraryPresenterTest.kt b/tests/NativeLibraryPresenterTest.kt
 new file mode 100644
-index 0000000..08fdcf1
+index 0000000..9f4530e
 --- /dev/null
 +++ b/tests/NativeLibraryPresenterTest.kt
-@@ -0,0 +1,281 @@
+@@ -0,0 +1,295 @@
 +// SPDX-FileCopyrightText: Copyright 2026 Eden Symbiosis Project
 +// SPDX-License-Identifier: GPL-3.0-or-later
 +//
@@ -4572,6 +6365,20 @@ index 0000000..08fdcf1
 +    val split = NativeLibraryPresenter.explain("split", "Big", "часть разрезанного образа")
 +    check("диалог части про целый файл", split.second.contains("целый файл"), split.second)
 +
++    // ── два ядра: пометка на плитке и счёт в сводке ─────────────────────
++    val hybrid = NativeLibraryPresenter.build(
++        games = games.mapIndexed { i, row -> if (i == 0) row.copy(core = "kenji") else row },
++        side = side
++    )
++    eq("ядро видно на плитке", hybrid.items[0].core, "kenji")
++    eq("у остальных игр пометки нет", hybrid.items[1].core, "")
++    check("сводка считает игры на втором ядре", hybrid.summary.contains("1 на Kenji-NX"), hybrid.summary)
++    eq(
++        "без второго ядра счёт не появляется",
++        NativeLibraryPresenter.build(games, side).summary.contains("Kenji-NX"),
++        false
++    )
++
 +    // ── связь с правилом «что такое игра» ───────────────────────────────
 +    val real = LibraryIndex.classify("Hollow Knight [0100633007D48000][v0].nsz")
 +    eq("NSZ остаётся сжатым", real.kind, LibraryIndex.Kind.COMPRESSED)
@@ -4696,10 +6503,10 @@ index 0000000..08fdcf1
 +    }
 +}
 diff --git a/tools/run_tests.sh b/tools/run_tests.sh
-index c52fdb1..c109272 100644
+index c52fdb1..dc4bbde 100644
 --- a/tools/run_tests.sh
 +++ b/tools/run_tests.sh
-@@ -104,10 +104,41 @@ done
+@@ -104,10 +104,44 @@ done
  
  # Kotlin tests, when a compiler is available.
  if command -v kotlinc >/dev/null 2>&1; then
@@ -4719,6 +6526,9 @@ index c52fdb1..c109272 100644
 +      NativeLibraryPresenterTest) echo "$HERE/patch/android/utils/LibraryIndex.kt \
 +        $HERE/patch/android/utils/NativeLibraryPresenter.kt \
 +        $HERE/patch/android/utils/Manual.kt" ;;
++      # The hybrid decides which Eden setting reaches the second core, and
++      # which stays its own. Plain Kotlin, so it compiles against the real file.
++      EngineHybridTest) echo "$HERE/patch/android/utils/EngineHybrid.kt" ;;
 +      *)                echo "" ;;
 +    esac
 +  }
