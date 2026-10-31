@@ -215,3 +215,31 @@ passed=68 failed=0
 Что не покрыто: сама вёрстка. `fragment_native_launcher.xml` и карточки
 руководства проверяются только сборкой в Actions — здесь нет ни aapt2, ни
 эмулятора.
+
+---
+
+## 9. Сборка APK с нативным лаунчером
+
+GitHub Actions, workflow **Build APK**, ветка `fix/library-sees-all-games`,
+коммит `23672b4`, run `41191000653` — **success**, все шаги зелёные.
+
+```
+PASS  LibraryIndexTest — passed=65 failed=0
+PASS  NativeLibraryPresenterTest — passed=68 failed=0
+passed=37 failed=0 skipped=3          # C++ на хосте
+APK: app-legacy-debug.apk (43M)
+MD5: 2685ef55b7a41d085e63b601eb372a1c
+Size: 42.6 MB
+ok   NativeLauncherFragment in dex
+ok   ManualFragment in dex
+ok   NativeLibraryPresenter in dex
+JNI symbols exported: 57
+Download: https://gofile.io/d/OyDLxkwS
+```
+
+Проверка `… in dex` добавлена в этой сборке намеренно: файл, лежащий в
+`symbiosis/patch/`, но не скопированный в дерево сборки, даёт зелёную сборку с
+прежним интерфейсом. Теперь сборка падает, если новый экран не попал в APK.
+
+Чего эта сборка не доказывает: что APK ведёт себя так же на телефоне. Ни один
+шаг здесь не запускал его на Mali-G57 и не открывал стартовый экран.
