@@ -1,0 +1,1202 @@
+diff --git a/docs/library.html b/docs/library.html
+index 9553244..dff7c05 100644
+--- a/docs/library.html
++++ b/docs/library.html
+@@ -107,6 +107,36 @@
+     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+   }
+   .empty { color:var(--dim); text-align:center; padding:40px 20px; }
++  /* Файл виден, но ядро его не откроет: бейдж, а не тишина. */
++  .game.dead { opacity:.92; border-style:dashed; }
++  .slide.dead { opacity:.75; }
++  .dead-mark { display:flex; flex-direction:column; align-items:center; gap:2px; font-size:22px; color:#ffd166; }
++  .dead-mark small { font-size:9px; letter-spacing:.02em; }
++  .dock .go.alt { background:#ffd166; color:#1a1300; }
++  .badge {
++    display:inline-block; margin-top:4px; padding:2px 8px; border-radius:999px;
++    font-size:11px; font-weight:600; color:#ffd166;
++    border:1px solid rgba(255,209,102,.45); background:rgba(255,209,102,.12);
++  }
++  .badge.dlc { color:var(--cyan); border-color:rgba(62,224,212,.45); background:rgba(62,224,212,.12); }
++  .badge.upd { color:#9fb4ff; border-color:rgba(159,180,255,.45); background:rgba(159,180,255,.12); }
++  .stat-line { font-weight:400; color:var(--dim); font-size:12px; margin-top:4px; }
++  .why { position:fixed; inset:0; z-index:30; display:none; background:rgba(6,8,12,.72); }
++  .why.on { display:block; }
++  .why-sheet {
++    position:absolute; left:0; right:0; bottom:0; max-height:82%;
++    border-radius:18px 18px 0 0; background:var(--card);
++    border-top:1px solid var(--line); padding:14px 14px 22px; overflow:auto;
++  }
++  .why-head { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
++  .why-head h3 { font-size:15px; flex:1; margin:0; }
++  .why-row {
++    border-top:1px solid var(--line); padding:8px 0; font-size:12.5px;
++    display:flex; gap:8px; align-items:flex-start;
++  }
++  .why-row .n { flex:1; min-width:0; }
++  .why-row .why-reason { color:var(--dim); font-size:11.5px; margin-top:2px; }
++  .why-sum { color:var(--cyan); font-size:12.5px; margin-bottom:10px; line-height:1.45; }
+   .fabs {
+     position:absolute; right:16px; bottom:72px;
+     display:flex; gap:8px; z-index:4;
+@@ -438,11 +468,13 @@
+   <button data-filter="save">Сейв</button>
+   <button data-filter="mod">Мод</button>
+   <button data-filter="fresh">Не играли</button>
++  <button data-filter="dead">Не запускается</button>
+ </div>
+ <div class="status" id="status">
+   <div class="line" id="status-line">Ключи · Прошивка · Игры</div>
+   <div class="chips" id="chips"></div>
+   <div class="line" id="mem" style="margin-top:6px;font-weight:400"></div>
++  <div class="stat-line" id="stat-line"></div>
+ </div>
+ <div class="list" id="list"><div class="empty">загрузка…</div></div>
+ <div class="fabs">
+@@ -477,6 +509,16 @@
+   </div>
+ </div>
+ 
++<div class="why" id="why">
++  <div class="why-sheet">
++    <div class="why-head">
++      <h3>Почему не видно игр</h3>
++      <button class="iconbtn" id="why-close" title="Закрыть">✕</button>
++    </div>
++    <div id="why-body"></div>
++  </div>
++</div>
++
+ <div class="sheet" id="sheet">
+   <div class="box">
+     <h2 id="sheet-title">Игра</h2>
+@@ -523,6 +565,10 @@ function visibleGames() {
+   if (FILTER === 'save') list = list.filter(g => g.hasSave);
+   if (FILTER === 'mod') list = list.filter(g => (g.addons||[]).some(a => a && a.enabled !== false));
+   if (FILTER === 'fresh') list = list.filter(g => !g.playSeconds && !g.lastPlayed);
++  // «Не запускается» - ровно те файлы, которые прошлая сборка не показывала
++  // вообще: сжатые образы, части разрезанного дампа, непрочитанные.
++  if (FILTER === 'dead') list = list.filter(g => g.runnable === false);
++  if (FILTER === 'ok') list = list.filter(g => g.runnable !== false);
+   return sortGames(list);
+ }
+ 
+@@ -532,6 +578,13 @@ function visibleGames() {
+ // карусель до одной игры: остальные становились недоступны для запуска из
+ // лаунчера, а «не прокручивается» выглядело как «их тут нет».
+ function railGames() {
++  // Вся библиотека, включая файлы, которые ядро не откроет.
++  //
++  // Фильтровать их отсюда было бы соблазнительно - тап по такому файлу
++  // ведёт диалог, а не игру, - но именно фильтр в карусели и был багом
++  // v21: одна плитка на экране читалась как «одна игра в библиотеке».
++  // Поэтому набор остаётся полным, а состояние видно на плитке: значок ⧗
++  // и подпись «распаковать», плюс док меняет кнопку.
+   return sortGames(GAMES.slice());
+ }
+ 
+@@ -584,13 +637,21 @@ function render() {
+     const stats = bits.length ? `<div class="stats">${bits.map(b => `<span class="play">${esc(b)}</span>`).join('')}</div>` : '';
+     const shot = g.lastShot ? `<div class="shot" id="sh-${i}" data-shot="1"></div>` : '';
+     const tid = g.titleId ? `<div class="tid" data-tid="${esc(g.titleId)}">${esc(g.titleId)}${g.fileSize ? ' · ' + esc(g.fileSize) : ''}${g.version ? ' · ' + esc(g.version) : ''}</div>` : '';
+-    return `<div class="game" data-i="${i}">
+-      <div class="thumb" id="ic-${i}">▶</div>
++    const dead = g.runnable === false;
++    const badge = dead
++      ? `<span class="badge">${esc(g.reason || (g.kind === 'compressed' ? 'сжатый образ' : 'не запускается'))}</span>`
++      : (g.kind === 'dlc' ? '<span class="badge dlc">DLC</span>'
++        : g.kind === 'update' ? '<span class="badge upd">обновление</span>' : '');
++    const size = dead && g.fileSize ? `<div class="tid">${esc(g.fileSize)}${g.fileName ? ' · ' + esc(g.fileName) : ''}</div>` : '';
++    return `<div class="game${dead ? ' dead' : ''}" data-i="${i}">
++      <div class="thumb" id="ic-${i}">${dead ? '⧗' : '▶'}</div>
+       <div class="meta">
+-        <div class="title">${esc(g.title || 'без имени')}</div>
++        <div class="title">${esc(g.title || g.fileName || 'без имени')}</div>
+         <div class="sub">${esc(g.developer || '')}${save}</div>
++        ${badge}
+         ${stats}
+         ${tid}
++        ${size}
+       </div>
+       ${shot}
+       ${side}
+@@ -607,6 +668,7 @@ function render() {
+         copyTid(tidEl.dataset.tid);
+         return;
+       }
++      if (g.runnable === false) { deadAction(g); return; }
+       play(g);
+     });
+     el.addEventListener('contextmenu', ev => { ev.preventDefault(); holdMenu(g); });
+@@ -625,6 +687,7 @@ function render() {
+   });
+   list.forEach(g => {
+     const i = GAMES.indexOf(g);
++    if (g.runnable === false) return;
+     setTimeout(() => fillIcon(i, g.path), 30 * i);
+     if (g.lastShot) setTimeout(() => fillShot(i, g.lastShot), 40 * i);
+   });
+@@ -647,6 +710,7 @@ function fillShot(i, path) {
+ 
+ function play(g) {
+   if (!g || !g.path || !N() || !N().launch) return;
++  if (g.runnable === false) { deadAction(g); return; }
+   const eng = parse(call('engines'), null);
+   if (eng && eng.current && eng.current !== eng.launch) {
+     HOLD = g;
+@@ -673,6 +737,76 @@ function play(g) {
+   N().launch(g.path, g.title || '');
+ }
+ 
++// Файл, который библиотека видит, но ядро не откроет.
++//
++// Такой файл раньше не существовал для интерфейса: импортёр его
++// выбрасывал, и «из сотни файлов видна одна» было правдой. Теперь он
++// на экране, и нажатие объясняет, что с ним делать, вместо тишины.
++function deadAction(g) {
++  HOLD = g;
++  $('sheet-title').textContent = g.title || g.fileName || 'Файл';
++  const kind = g.kind || '';
++  const reason = g.reason || 'ядро не открывает этот файл';
++  let note = reason;
++  let actions = '<button class="ghost" id="a-close">Закрыть</button>';
++  if (kind === 'compressed') {
++    note = reason + '. Распаковка идёт на телефоне и занимает столько же места, сколько сам образ.';
++    actions = '<button class="go" id="a-conv">Распаковать</button>' + actions;
++  } else if (kind === 'split') {
++    note = reason + '. Запускается склеенный файл целиком, части по отдельности - нет.';
++  } else {
++    note = reason + '. Чаще всего это ключи: без них заголовок не расшифровывается, и игра не появляется в списке.';
++    actions = '<button class="ghost" id="a-tools">Проверить ключи</button>' + actions;
++  }
++  $('sheet-note').textContent = note;
++  $('sheet-actions').innerHTML = actions;
++  const conv = $('a-conv');
++  if (conv) conv.onclick = () => {
++    closeSheet();
++    const r = parse(call('convertPath', g.path), null);
++    showTab('conv');
++    onConvertQueue(r || {});
++    $('bar').textContent = (r && r.error) || 'в очереди на распаковку · не закрывайте приложение';
++  };
++  const tools = $('a-tools');
++  if (tools) tools.onclick = () => {
++    closeSheet();
++    if (N() && N().openUtilities) N().openUtilities();
++  };
++  const close = $('a-close');
++  if (close) close.onclick = closeSheet;
++  openSheet();
++}
++
++// «Почему не видно» - ответ цифрами и причинами, а не ссылкой на лог.
++function whyNot() {
++  const rep = parse(call('libraryReport'), null);
++  if (!rep) { $('bar').textContent = 'отчёт недоступен'; return; }
++  const st = rep.stats || {};
++  const head = rep.headline || '';
++  const rows = (rep.files || []).map(f =>
++    `<div class="why-row"><div class="n"><b>${esc(f.title || f.name)}</b>` +
++    `<div class="why-reason">${esc(f.reason || f.kind)}</div></div></div>`
++  ).join('');
++  const more = (rep.total || 0) > (rep.files || []).length
++    ? `<div class="why-row"><div class="n">…и ещё ${rep.total - rep.files.length} файлов</div></div>` : '';
++  const byKind = rep.byKind || {};
++  const kinds = Object.keys(byKind).map(k =>
++    `${esc(k)}: <b>${byKind[k]}</b>`).join(' · ');
++  $('why-body').innerHTML =
++    `<div class="why-sum">${esc(head)}${kinds ? '<br>' + kinds : ''}</div>` +
++    (st.files !== undefined
++      ? `<div class="why-sum">папок ${st.folders} · файлов ${st.files} · игр ${st.games}` +
++        (st.updates ? ` · обновлений ${st.updates}` : '') +
++        (st.dlc ? ` · DLC ${st.dlc}` : '') +
++        (st.compressed ? ` · сжатых ${st.compressed}` : '') +
++        (st.failed ? ` · не прочитано ${st.failed}` : '') + '</div>'
++      : '') +
++    (rows || '<div class="why-row"><div class="n">все файлы в порядке</div></div>') +
++    more;
++  $('why').classList.add('on');
++}
++
+ function holdMenu(g) {
+   HOLD = g;
+   $('sheet-title').textContent = g.title || 'Игра';
+@@ -845,7 +979,9 @@ function renderLauncher() {
+ 
+   rail.innerHTML = RAIL_LIST.map((g, i) => {
+     const gi = GAMES.indexOf(g);
+-    return `<div class="slide${i===LAUNCH_I?' on':''}" data-ri="${i}" id="cvl-${gi}">▶</div>`;
++    const dead = g.runnable === false;
++    return `<div class="slide${i===LAUNCH_I?' on':''}${dead ? ' dead' : ''}" data-ri="${i}" id="cvl-${gi}">` +
++      (dead ? '<span class="dead-mark">⧗<small>распаковать</small></span>' : '▶') + '</div>';
+   }).join('');
+   rail.querySelectorAll('.slide').forEach(el => {
+     el.addEventListener('click', () => {
+@@ -919,7 +1055,7 @@ function paintDock() {
+       <h2>${esc(g.title || 'без имени')}</h2>
+       <div class="who">${esc(g.developer || '')}${g.titleId ? ' · ' + esc(g.titleId) : ''}${g.fileSize ? ' · ' + esc(g.fileSize) : ''}${g.version ? ' · ' + esc(g.version) : ''}</div>
+       <div class="pos">${LAUNCH_I + 1} / ${RAIL_LIST.length}</div>
+-      <button class="go" id="dock-go">Запустить</button>
++      <button class="go${g.runnable === false ? ' alt' : ''}" id="dock-go">${g.runnable === false ? 'Распаковать' : 'Запустить'}</button>
+     </div>
+     <div class="dock-body">
+       <div class="facts">
+@@ -940,7 +1076,7 @@ function paintDock() {
+         <button class="ghost" id="dock-aaa">AAA минимум</button>
+       </div>
+     </div>`;
+-  $('dock-go').onclick = () => play(g);
++  $('dock-go').onclick = () => { if (g.runnable === false) deadAction(g); else play(g); };
+   $('dock-shots-btn').onclick = () => openShots(g);
+   $('dock-props').onclick = () => { if (N() && N().openGameMenu) N().openGameMenu(g.path); };
+   $('dock-aaa').onclick = () => {
+@@ -1141,13 +1277,33 @@ function fillDockShots(g) {
+   });
+ }
+ 
++let STATS = null;
++
+ function loadGames() {
+-  GAMES = (parse(call('games'), { games: [] }).games) || [];
++  const payload = parse(call('games'), { games: [] });
++  GAMES = payload.games || [];
++  STATS = payload.stats || null;
+   render();
++  paintStats();
+   renderLauncher();
+   if (SPACE === 'kenji') renderKenjiGrid();
+ }
+ 
++// Сводка обхода: «214 файлов · 12 игр · 8 обновл. · 150 сжатых».
++//
++// Без неё «одна игра» и «одна игра и 150 сжатых файлов» выглядели
++// одинаково, и починить это можно было только угадыванием.
++function paintStats() {
++  const el = $('stat-line');
++  if (!el) return;
++  const st = STATS;
++  if (!st || !st.known) { el.innerHTML = ''; return; }
++  el.innerHTML = esc(st.line || '') +
++    ' · <button class="chip tap" id="btn-why">почему?</button>';
++  const b = $('btn-why');
++  if (b) b.onclick = whyNot;
++}
++
+ function loadStatus() {
+   const st = parse(call('status'), null);
+   const folders = parse(call('folders'), { folders: [] }).folders || [];
+@@ -1725,6 +1881,11 @@ function paintKenjiBar(data) {
+   }
+ }
+ 
++$('why-close').onclick = () => $('why').classList.remove('on');
++$('why').addEventListener('click', ev => {
++  if (ev.target === $('why')) $('why').classList.remove('on');
++});
++
+ function renderKenjiGrid() {
+   const box = $('k-grid');
+   if (!box) return;
+diff --git a/patch/android/assets/library.html b/patch/android/assets/library.html
+index 9553244..dff7c05 100644
+--- a/patch/android/assets/library.html
++++ b/patch/android/assets/library.html
+@@ -107,6 +107,36 @@
+     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+   }
+   .empty { color:var(--dim); text-align:center; padding:40px 20px; }
++  /* Файл виден, но ядро его не откроет: бейдж, а не тишина. */
++  .game.dead { opacity:.92; border-style:dashed; }
++  .slide.dead { opacity:.75; }
++  .dead-mark { display:flex; flex-direction:column; align-items:center; gap:2px; font-size:22px; color:#ffd166; }
++  .dead-mark small { font-size:9px; letter-spacing:.02em; }
++  .dock .go.alt { background:#ffd166; color:#1a1300; }
++  .badge {
++    display:inline-block; margin-top:4px; padding:2px 8px; border-radius:999px;
++    font-size:11px; font-weight:600; color:#ffd166;
++    border:1px solid rgba(255,209,102,.45); background:rgba(255,209,102,.12);
++  }
++  .badge.dlc { color:var(--cyan); border-color:rgba(62,224,212,.45); background:rgba(62,224,212,.12); }
++  .badge.upd { color:#9fb4ff; border-color:rgba(159,180,255,.45); background:rgba(159,180,255,.12); }
++  .stat-line { font-weight:400; color:var(--dim); font-size:12px; margin-top:4px; }
++  .why { position:fixed; inset:0; z-index:30; display:none; background:rgba(6,8,12,.72); }
++  .why.on { display:block; }
++  .why-sheet {
++    position:absolute; left:0; right:0; bottom:0; max-height:82%;
++    border-radius:18px 18px 0 0; background:var(--card);
++    border-top:1px solid var(--line); padding:14px 14px 22px; overflow:auto;
++  }
++  .why-head { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
++  .why-head h3 { font-size:15px; flex:1; margin:0; }
++  .why-row {
++    border-top:1px solid var(--line); padding:8px 0; font-size:12.5px;
++    display:flex; gap:8px; align-items:flex-start;
++  }
++  .why-row .n { flex:1; min-width:0; }
++  .why-row .why-reason { color:var(--dim); font-size:11.5px; margin-top:2px; }
++  .why-sum { color:var(--cyan); font-size:12.5px; margin-bottom:10px; line-height:1.45; }
+   .fabs {
+     position:absolute; right:16px; bottom:72px;
+     display:flex; gap:8px; z-index:4;
+@@ -438,11 +468,13 @@
+   <button data-filter="save">Сейв</button>
+   <button data-filter="mod">Мод</button>
+   <button data-filter="fresh">Не играли</button>
++  <button data-filter="dead">Не запускается</button>
+ </div>
+ <div class="status" id="status">
+   <div class="line" id="status-line">Ключи · Прошивка · Игры</div>
+   <div class="chips" id="chips"></div>
+   <div class="line" id="mem" style="margin-top:6px;font-weight:400"></div>
++  <div class="stat-line" id="stat-line"></div>
+ </div>
+ <div class="list" id="list"><div class="empty">загрузка…</div></div>
+ <div class="fabs">
+@@ -477,6 +509,16 @@
+   </div>
+ </div>
+ 
++<div class="why" id="why">
++  <div class="why-sheet">
++    <div class="why-head">
++      <h3>Почему не видно игр</h3>
++      <button class="iconbtn" id="why-close" title="Закрыть">✕</button>
++    </div>
++    <div id="why-body"></div>
++  </div>
++</div>
++
+ <div class="sheet" id="sheet">
+   <div class="box">
+     <h2 id="sheet-title">Игра</h2>
+@@ -523,6 +565,10 @@ function visibleGames() {
+   if (FILTER === 'save') list = list.filter(g => g.hasSave);
+   if (FILTER === 'mod') list = list.filter(g => (g.addons||[]).some(a => a && a.enabled !== false));
+   if (FILTER === 'fresh') list = list.filter(g => !g.playSeconds && !g.lastPlayed);
++  // «Не запускается» - ровно те файлы, которые прошлая сборка не показывала
++  // вообще: сжатые образы, части разрезанного дампа, непрочитанные.
++  if (FILTER === 'dead') list = list.filter(g => g.runnable === false);
++  if (FILTER === 'ok') list = list.filter(g => g.runnable !== false);
+   return sortGames(list);
+ }
+ 
+@@ -532,6 +578,13 @@ function visibleGames() {
+ // карусель до одной игры: остальные становились недоступны для запуска из
+ // лаунчера, а «не прокручивается» выглядело как «их тут нет».
+ function railGames() {
++  // Вся библиотека, включая файлы, которые ядро не откроет.
++  //
++  // Фильтровать их отсюда было бы соблазнительно - тап по такому файлу
++  // ведёт диалог, а не игру, - но именно фильтр в карусели и был багом
++  // v21: одна плитка на экране читалась как «одна игра в библиотеке».
++  // Поэтому набор остаётся полным, а состояние видно на плитке: значок ⧗
++  // и подпись «распаковать», плюс док меняет кнопку.
+   return sortGames(GAMES.slice());
+ }
+ 
+@@ -584,13 +637,21 @@ function render() {
+     const stats = bits.length ? `<div class="stats">${bits.map(b => `<span class="play">${esc(b)}</span>`).join('')}</div>` : '';
+     const shot = g.lastShot ? `<div class="shot" id="sh-${i}" data-shot="1"></div>` : '';
+     const tid = g.titleId ? `<div class="tid" data-tid="${esc(g.titleId)}">${esc(g.titleId)}${g.fileSize ? ' · ' + esc(g.fileSize) : ''}${g.version ? ' · ' + esc(g.version) : ''}</div>` : '';
+-    return `<div class="game" data-i="${i}">
+-      <div class="thumb" id="ic-${i}">▶</div>
++    const dead = g.runnable === false;
++    const badge = dead
++      ? `<span class="badge">${esc(g.reason || (g.kind === 'compressed' ? 'сжатый образ' : 'не запускается'))}</span>`
++      : (g.kind === 'dlc' ? '<span class="badge dlc">DLC</span>'
++        : g.kind === 'update' ? '<span class="badge upd">обновление</span>' : '');
++    const size = dead && g.fileSize ? `<div class="tid">${esc(g.fileSize)}${g.fileName ? ' · ' + esc(g.fileName) : ''}</div>` : '';
++    return `<div class="game${dead ? ' dead' : ''}" data-i="${i}">
++      <div class="thumb" id="ic-${i}">${dead ? '⧗' : '▶'}</div>
+       <div class="meta">
+-        <div class="title">${esc(g.title || 'без имени')}</div>
++        <div class="title">${esc(g.title || g.fileName || 'без имени')}</div>
+         <div class="sub">${esc(g.developer || '')}${save}</div>
++        ${badge}
+         ${stats}
+         ${tid}
++        ${size}
+       </div>
+       ${shot}
+       ${side}
+@@ -607,6 +668,7 @@ function render() {
+         copyTid(tidEl.dataset.tid);
+         return;
+       }
++      if (g.runnable === false) { deadAction(g); return; }
+       play(g);
+     });
+     el.addEventListener('contextmenu', ev => { ev.preventDefault(); holdMenu(g); });
+@@ -625,6 +687,7 @@ function render() {
+   });
+   list.forEach(g => {
+     const i = GAMES.indexOf(g);
++    if (g.runnable === false) return;
+     setTimeout(() => fillIcon(i, g.path), 30 * i);
+     if (g.lastShot) setTimeout(() => fillShot(i, g.lastShot), 40 * i);
+   });
+@@ -647,6 +710,7 @@ function fillShot(i, path) {
+ 
+ function play(g) {
+   if (!g || !g.path || !N() || !N().launch) return;
++  if (g.runnable === false) { deadAction(g); return; }
+   const eng = parse(call('engines'), null);
+   if (eng && eng.current && eng.current !== eng.launch) {
+     HOLD = g;
+@@ -673,6 +737,76 @@ function play(g) {
+   N().launch(g.path, g.title || '');
+ }
+ 
++// Файл, который библиотека видит, но ядро не откроет.
++//
++// Такой файл раньше не существовал для интерфейса: импортёр его
++// выбрасывал, и «из сотни файлов видна одна» было правдой. Теперь он
++// на экране, и нажатие объясняет, что с ним делать, вместо тишины.
++function deadAction(g) {
++  HOLD = g;
++  $('sheet-title').textContent = g.title || g.fileName || 'Файл';
++  const kind = g.kind || '';
++  const reason = g.reason || 'ядро не открывает этот файл';
++  let note = reason;
++  let actions = '<button class="ghost" id="a-close">Закрыть</button>';
++  if (kind === 'compressed') {
++    note = reason + '. Распаковка идёт на телефоне и занимает столько же места, сколько сам образ.';
++    actions = '<button class="go" id="a-conv">Распаковать</button>' + actions;
++  } else if (kind === 'split') {
++    note = reason + '. Запускается склеенный файл целиком, части по отдельности - нет.';
++  } else {
++    note = reason + '. Чаще всего это ключи: без них заголовок не расшифровывается, и игра не появляется в списке.';
++    actions = '<button class="ghost" id="a-tools">Проверить ключи</button>' + actions;
++  }
++  $('sheet-note').textContent = note;
++  $('sheet-actions').innerHTML = actions;
++  const conv = $('a-conv');
++  if (conv) conv.onclick = () => {
++    closeSheet();
++    const r = parse(call('convertPath', g.path), null);
++    showTab('conv');
++    onConvertQueue(r || {});
++    $('bar').textContent = (r && r.error) || 'в очереди на распаковку · не закрывайте приложение';
++  };
++  const tools = $('a-tools');
++  if (tools) tools.onclick = () => {
++    closeSheet();
++    if (N() && N().openUtilities) N().openUtilities();
++  };
++  const close = $('a-close');
++  if (close) close.onclick = closeSheet;
++  openSheet();
++}
++
++// «Почему не видно» - ответ цифрами и причинами, а не ссылкой на лог.
++function whyNot() {
++  const rep = parse(call('libraryReport'), null);
++  if (!rep) { $('bar').textContent = 'отчёт недоступен'; return; }
++  const st = rep.stats || {};
++  const head = rep.headline || '';
++  const rows = (rep.files || []).map(f =>
++    `<div class="why-row"><div class="n"><b>${esc(f.title || f.name)}</b>` +
++    `<div class="why-reason">${esc(f.reason || f.kind)}</div></div></div>`
++  ).join('');
++  const more = (rep.total || 0) > (rep.files || []).length
++    ? `<div class="why-row"><div class="n">…и ещё ${rep.total - rep.files.length} файлов</div></div>` : '';
++  const byKind = rep.byKind || {};
++  const kinds = Object.keys(byKind).map(k =>
++    `${esc(k)}: <b>${byKind[k]}</b>`).join(' · ');
++  $('why-body').innerHTML =
++    `<div class="why-sum">${esc(head)}${kinds ? '<br>' + kinds : ''}</div>` +
++    (st.files !== undefined
++      ? `<div class="why-sum">папок ${st.folders} · файлов ${st.files} · игр ${st.games}` +
++        (st.updates ? ` · обновлений ${st.updates}` : '') +
++        (st.dlc ? ` · DLC ${st.dlc}` : '') +
++        (st.compressed ? ` · сжатых ${st.compressed}` : '') +
++        (st.failed ? ` · не прочитано ${st.failed}` : '') + '</div>'
++      : '') +
++    (rows || '<div class="why-row"><div class="n">все файлы в порядке</div></div>') +
++    more;
++  $('why').classList.add('on');
++}
++
+ function holdMenu(g) {
+   HOLD = g;
+   $('sheet-title').textContent = g.title || 'Игра';
+@@ -845,7 +979,9 @@ function renderLauncher() {
+ 
+   rail.innerHTML = RAIL_LIST.map((g, i) => {
+     const gi = GAMES.indexOf(g);
+-    return `<div class="slide${i===LAUNCH_I?' on':''}" data-ri="${i}" id="cvl-${gi}">▶</div>`;
++    const dead = g.runnable === false;
++    return `<div class="slide${i===LAUNCH_I?' on':''}${dead ? ' dead' : ''}" data-ri="${i}" id="cvl-${gi}">` +
++      (dead ? '<span class="dead-mark">⧗<small>распаковать</small></span>' : '▶') + '</div>';
+   }).join('');
+   rail.querySelectorAll('.slide').forEach(el => {
+     el.addEventListener('click', () => {
+@@ -919,7 +1055,7 @@ function paintDock() {
+       <h2>${esc(g.title || 'без имени')}</h2>
+       <div class="who">${esc(g.developer || '')}${g.titleId ? ' · ' + esc(g.titleId) : ''}${g.fileSize ? ' · ' + esc(g.fileSize) : ''}${g.version ? ' · ' + esc(g.version) : ''}</div>
+       <div class="pos">${LAUNCH_I + 1} / ${RAIL_LIST.length}</div>
+-      <button class="go" id="dock-go">Запустить</button>
++      <button class="go${g.runnable === false ? ' alt' : ''}" id="dock-go">${g.runnable === false ? 'Распаковать' : 'Запустить'}</button>
+     </div>
+     <div class="dock-body">
+       <div class="facts">
+@@ -940,7 +1076,7 @@ function paintDock() {
+         <button class="ghost" id="dock-aaa">AAA минимум</button>
+       </div>
+     </div>`;
+-  $('dock-go').onclick = () => play(g);
++  $('dock-go').onclick = () => { if (g.runnable === false) deadAction(g); else play(g); };
+   $('dock-shots-btn').onclick = () => openShots(g);
+   $('dock-props').onclick = () => { if (N() && N().openGameMenu) N().openGameMenu(g.path); };
+   $('dock-aaa').onclick = () => {
+@@ -1141,13 +1277,33 @@ function fillDockShots(g) {
+   });
+ }
+ 
++let STATS = null;
++
+ function loadGames() {
+-  GAMES = (parse(call('games'), { games: [] }).games) || [];
++  const payload = parse(call('games'), { games: [] });
++  GAMES = payload.games || [];
++  STATS = payload.stats || null;
+   render();
++  paintStats();
+   renderLauncher();
+   if (SPACE === 'kenji') renderKenjiGrid();
+ }
+ 
++// Сводка обхода: «214 файлов · 12 игр · 8 обновл. · 150 сжатых».
++//
++// Без неё «одна игра» и «одна игра и 150 сжатых файлов» выглядели
++// одинаково, и починить это можно было только угадыванием.
++function paintStats() {
++  const el = $('stat-line');
++  if (!el) return;
++  const st = STATS;
++  if (!st || !st.known) { el.innerHTML = ''; return; }
++  el.innerHTML = esc(st.line || '') +
++    ' · <button class="chip tap" id="btn-why">почему?</button>';
++  const b = $('btn-why');
++  if (b) b.onclick = whyNot;
++}
++
+ function loadStatus() {
+   const st = parse(call('status'), null);
+   const folders = parse(call('folders'), { folders: [] }).folders || [];
+@@ -1725,6 +1881,11 @@ function paintKenjiBar(data) {
+   }
+ }
+ 
++$('why-close').onclick = () => $('why').classList.remove('on');
++$('why').addEventListener('click', ev => {
++  if (ev.target === $('why')) $('why').classList.remove('on');
++});
++
+ function renderKenjiGrid() {
+   const box = $('k-grid');
+   if (!box) return;
+diff --git a/patch/android/fragments/LivePanelFragment.kt b/patch/android/fragments/LivePanelFragment.kt
+index 993d3fc..a848c98 100644
+--- a/patch/android/fragments/LivePanelFragment.kt
++++ b/patch/android/fragments/LivePanelFragment.kt
+@@ -5,6 +5,7 @@ package org.yuzu.yuzu_emu.fragments
+ 
+ import android.annotation.SuppressLint
+ import android.content.Intent
++import android.net.Uri
+ import android.os.Bundle
+ import android.os.Handler
+ import android.os.Looper
+@@ -373,6 +374,26 @@ class LivePanelFragment : Fragment() {
+             Converter.delete(path)
+         }.getOrDefault("""{"ok":false}""")
+ 
++        /**
++         * Распаковать файл прямо из библиотеки.
++         *
++         * Раньше «сжатый образ» был тупиком: строки в списке нет, а
++         * Конвертер просил выбрать файл заново через системный пикер.
++         * Теперь кнопка на карточке отдаёт тот самый документ, который
++         * библиотека уже нашла.
++         */
++        @JavascriptInterface
++        fun convertPath(path: String): String = runCatching {
++            val uri = Uri.parse(path)
++            Converter.enqueue(requireContext().applicationContext, listOf(uri))
++        }.getOrDefault("""{"busy":false,"pending":0,"error":"не удалось поставить в очередь"}""")
++
++        /** Почему из сотни файлов видна одна: цифры и причины словами. */
++        @JavascriptInterface
++        fun libraryReport(): String = runCatching {
++            LivePanel.libraryReport(requireContext().applicationContext)
++        }.getOrDefault("""{"stats":{"known":false},"headline":"нет данных","files":[]}""")
++
+         @JavascriptInterface
+         fun canOpen(path: String): Boolean = runCatching {
+             Converter.canOpen(path)
+diff --git a/patch/android/utils/GameFolderScanner.kt b/patch/android/utils/GameFolderScanner.kt
+index fd699af..82f383c 100644
+--- a/patch/android/utils/GameFolderScanner.kt
++++ b/patch/android/utils/GameFolderScanner.kt
+@@ -27,6 +27,19 @@ object GameFolderScanner {
+      */
+     private val ROM_EXTENSIONS = GameFormats.LAUNCHABLE
+ 
++    /**
++     * Всё, что библиотека показывает: игры, обновления, DLC и сжатые.
++     *
++     * `LibraryIndex` - единственное место, где это решается. Здесь стояла
++     * вторая копия (`LAUNCHABLE + COMPRESSED`), и она разошлась с
++     * импортёром ровно так же, как когда-то разошлась глубина: счётчик
++     * обещал файлы, которых в списке не появлялось.
++     */
++    private fun wanted(name: String): Boolean = LibraryIndex.isWanted(name)
++
++    /** Сжатый образ: виден в счётчике, но ядром не открывается. */
++    private fun compressed(name: String): Boolean = LibraryIndex.classify(name).kind == LibraryIndex.Kind.COMPRESSED
++
+     /**
+      * Всё, что человек считает файлом игры - включая то, что сам эмулятор
+      * не откроет.
+@@ -75,8 +88,7 @@ object GameFolderScanner {
+                     val mime = it.getString(1) ?: ""
+                     val size = if (it.isNull(2)) 0L else it.getLong(2)
+                     if (mime == DocumentsContract.Document.MIME_TYPE_DIR) continue
+-                    val ext = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+-                    if (ext in SHOWABLE_EXTENSIONS || name.lowercase(Locale.ROOT) in ROM_FILENAMES) {
++                    if (wanted(name)) {
+                         out.add(Entry(name, size))
+                     }
+                 }
+@@ -119,7 +131,14 @@ object GameFolderScanner {
+         /** Depth this folder was scanned at, so the file list can match. */
+         val depth: Int = 1,
+         /** True when the folder could not be read at all. */
+-        val unreadable: Boolean = false
++        val unreadable: Boolean = false,
++        /**
++         * Сжатые образы в этой папке.
++         *
++         * Отдельно от [gameCount], потому что это разные ответы на разные
++         * вопросы: «сколько игр» и «почему из сотни файлов видна одна».
++         */
++        val compressed: Int = 0
+     )
+ 
+     /**
+@@ -257,6 +276,7 @@ object GameFolderScanner {
+         var count = 0
+         var bytes = 0L
+         var skipped = 0
++        var compressedCount = 0
+         var readable = false
+ 
+         // Iterative rather than recursive: a pathological tree should not be
+@@ -267,7 +287,8 @@ object GameFolderScanner {
+ 
+         var guard = 0
+         val seen = HashSet<String>()
+-        while (queue.isNotEmpty() && guard < MAX_DIRECTORIES) {
++        val started = System.nanoTime()
++        while (queue.isNotEmpty() && guard < MAX_DIRECTORIES && !expired(started)) {
+             guard++
+             // Прервать обход, когда результат уже никому не нужен.
+             //
+@@ -325,18 +346,26 @@ object GameFolderScanner {
+                     }
+ 
+                     val ext = displayName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+-                    if (isRom(displayName)) {
+-                        count++
+-                        bytes += size
+-                    } else if (ext in NON_GAME_EXTENSIONS) {
+-                        skipped++
++                    when {
++                        GameFolderScanner.compressed(displayName) -> {
++                            compressedCount++
++                            bytes += size
++                        }
++                        isRom(displayName) -> {
++                            count++
++                            bytes += size
++                        }
++                        ext in NON_GAME_EXTENSIONS -> skipped++
+                     }
+                 }
+             }
+             }
+         }
+ 
+-        return Folder(uriString, name, count, bytes, skipped, maxDepth, unreadable = !readable)
++        return Folder(
++            uriString, name, count, bytes, skipped, maxDepth,
++            unreadable = !readable, compressed = compressedCount
++        )
+     }
+ 
+     data class Entry(
+@@ -377,8 +406,9 @@ object GameFolderScanner {
+         queue.add(Triple(root, "", maxDepth))
+         var guard = 0
+         val seen = HashSet<String>()
++        val started = System.nanoTime()
+ 
+-        while (queue.isNotEmpty() && guard < MAX_DIRECTORIES) {
++        while (queue.isNotEmpty() && guard < MAX_DIRECTORIES && !expired(started)) {
+             guard++
+             if (!stillWanted()) break
+             // Верхняя граница на размер ответа.
+@@ -494,7 +524,8 @@ object GameFolderScanner {
+         var guard = 0
+         val queue = ArrayDeque<java.io.File>()
+         queue.add(root)
+-        while (queue.isNotEmpty() && guard < MAX_DIRECTORIES) {
++        val started = System.nanoTime()
++        while (queue.isNotEmpty() && guard < MAX_DIRECTORIES && !expired(started)) {
+             guard++
+             val entries = queue.removeFirst().listFiles() ?: continue
+             for (entry in entries) {
+@@ -514,8 +545,30 @@ object GameFolderScanner {
+         return String.format(Locale.US, "%.0f KB", bytes / 1024.0)
+     }
+ 
+-    /** Stops a symlink loop or an absurd tree from hanging the scan. */
+-    private const val MAX_DIRECTORIES = 400
++    /**
++     * Потолок на число каталогов в обходе.
++     *
++     * Было 400. Дамп «одна папка на игру» на 500 игр честно упирался в
++     * этот потолок и обрывался молча - счётчик показывал 400 файлов там,
++     * где их 500, а хвост алфавита пропадал целиком. Теперь потолок такой,
++     * что в него не влезает только совсем патологическое дерево, а от
++     * зависания защищает ещё и [SCAN_BUDGET_MS].
++     */
++    private const val MAX_DIRECTORIES = 20000
++
++    /**
++     * Сколько миллисекунд обход может идти до принудительной остановки.
++     *
++     * Каталог на SD-карте через SAF отвечает десятками миллисекунд, 20 000
++     * каталогов - это минуты. Бюджет срабатывает только на больном дереве
++     * (или на выдернутой карте), и лучше показать то, что успели, чем
++     * крутить вечность.
++     */
++    private const val SCAN_BUDGET_MS = 25_000L
++
++    /** Истёк ли бюджет обхода. */
++    private fun expired(startedAtNanos: Long): Boolean =
++        (System.nanoTime() - startedAtNanos) / 1_000_000L > SCAN_BUDGET_MS
+ 
+     /**
+      * Потолок на длину списка файлов.
+@@ -524,5 +577,5 @@ object GameFolderScanner {
+      * в куче и целиком уходит в адаптер. Три тысячи строк экран всё равно
+      * не покажет осмысленно, а вылет по нехватке памяти покажет.
+      */
+-    private const val MAX_ENTRIES = 3000
++    private const val MAX_ENTRIES = 20000
+ }
+diff --git a/patch/android/utils/GameHelper.kt b/patch/android/utils/GameHelper.kt
+index 8bb8f25..fc5bd4d 100644
+--- a/patch/android/utils/GameHelper.kt
++++ b/patch/android/utils/GameHelper.kt
+@@ -38,7 +38,76 @@ object GameHelper {
+     var hasScanned = false
+         private set
+ 
+-    private lateinit var preferences: SharedPreferences
++    /**
++     * Настройки, доступные всегда.
++     *
++     * Было `lateinit var preferences` и присваивание только внутри
++     * getGames(). `getGame()` зовётся ещё и из добавления игры по одной
++     * файловой кнопкой - там lateinit бросал UninitializedPropertyAccess-
++     * Exception, и добавление падало целиком.
++     */
++    private val prefs: SharedPreferences
++        get() {
++            val cached = prefsCache
++            if (cached != null) return cached
++            val fresh = PreferenceManager.getDefaultSharedPreferences(YuzuApplication.appContext)
++            prefsCache = fresh
++            return fresh
++        }
++
++    @Volatile
++    private var prefsCache: SharedPreferences? = null
++
++    private var preferences: SharedPreferences
++        get() = prefs
++        set(value) {
++            prefsCache = value
++        }
++
++    /**
++     * Файлы, которые библиотека видит, но запустить не может.
++     *
++     * Ими и объясняется «из сотен файлов видна одна»: сжатый NSZ ядро не
++     * открывает, `getIsValid` возвращает false, и раньше запись просто не
++     * создавалась. Теперь она есть - с причиной словами, - и панель может
++     * предложить распаковку вместо пустого экрана.
++     */
++    data class Sidecar(
++        val name: String,
++        val path: String,
++        val title: String,
++        val reason: String,
++        val kind: String
++    )
++
++    @Volatile
++    var sidecar: List<Sidecar> = emptyList()
++        private set
++
++    /** Итог последнего обхода. Показывается строкой «что нашлось и почему». */
++    data class ScanStats(
++        var folders: Int = 0,
++        var files: Int = 0,
++        var games: Int = 0,
++        var updates: Int = 0,
++        var dlc: Int = 0,
++        var compressed: Int = 0,
++        var failed: Int = 0,
++        var millis: Long = 0
++    ) {
++        fun line(): String = buildString {
++            append("$games ${if (games == 1) "игра" else "игр"}")
++            if (updates > 0) append(" · $updates обновл.")
++            if (dlc > 0) append(" · $dlc DLC")
++            if (compressed > 0) append(" · $compressed сжатых")
++            if (failed > 0) append(" · $failed не прочитано")
++            append(" · $files файлов за ${millis} мс")
++        }
++    }
++
++    @Volatile
++    var scanStats: ScanStats = ScanStats()
++        private set
+ 
+     /**
+      * The last list the emulator managed to read, from memory or from disk.
+@@ -141,6 +210,10 @@ object GameHelper {
+         val mountedContainerUris = mutableSetOf<String>()
+         mountExternalContentDirectories(mountedContainerUris)
+ 
++        val stats = ScanStats()
++        val startedAt = System.currentTimeMillis()
++        val side = mutableListOf<Sidecar>()
++
+         val badDirs = mutableListOf<Int>()
+         gameDirs.forEachIndexed { index: Int, gameDir: GameDir ->
+             val gameDirUri = gameDir.uriString.toUri()
+@@ -158,7 +231,9 @@ object GameHelper {
+                     games,
+                     FileUtil.listFiles(gameDirUri),
+                     scanDepth,
+-                    mountedContainerUris
++                    mountedContainerUris,
++                    side,
++                    stats
+                 )
+             } else {
+                 badDirs.add(index)
+@@ -186,6 +261,10 @@ object GameHelper {
+         }
+ 
+         cachedGameList = games.toMutableList()
++        sidecar = side.toList()
++        stats.folders = gameDirs.size
++        stats.millis = System.currentTimeMillis() - startedAt
++        scanStats = stats
+         hasScanned = true
+         return games.toList()
+     }
+@@ -232,7 +311,9 @@ object GameHelper {
+         games: MutableList<Game>,
+         files: Array<MinimalDocumentFile>,
+         depth: Int,
+-        mountedContainerUris: MutableSet<String>
++        mountedContainerUris: MutableSet<String>,
++        side: MutableList<Sidecar>,
++        stats: ScanStats
+     ) {
+         if (depth <= 0) {
+             return
+@@ -251,27 +332,76 @@ object GameHelper {
+                         games,
+                         FileUtil.listFiles(it.uri),
+                         depth - 1,
+-                        mountedContainerUris
++                        mountedContainerUris,
++                        side,
++                        stats
+                     )
+                 }
+             } else {
+                 val extension = FileUtil.getExtension(it.uri).lowercase()
+                 val filePath = it.uri.toString()
++                val filename = FileUtil.getFilename(it.uri)
++                stats.files++
+ 
+                 if (externalContentExtensions.contains(extension) &&
+                     mountedContainerUris.add(filePath)) {
+                     NativeLibrary.addGameFolderFileToFilesystemProvider(filePath)
+                 }
+ 
+-                // Game.extensions — урезанный список. Ядро открывает
+-                // ещё nso/kip и файлы main/00 (loader.cpp).
+-                val filename = FileUtil.getFilename(it.uri)
+-                if (Game.extensions.contains(extension) || GameFormats.isLaunchable(filename)) {
+-                    val game = getGame(it.uri, true, false)
+-                    if (game != null) {
+-                        games.add(game)
++                // Одно правило видимости на всех: GameFormats и LibraryIndex.
++                //
++                // Здесь стояло `Game.extensions.contains(extension) ||
++                // GameFormats.isLaunchable(filename)` - и nsz/xcz/ncz,
++                // которых в папке большинство, не попадали ни в список, ни
++                // в отчёт. Пользователь видел единственный nsp, который
++                // случайно оказался рядом.
++                if (!LibraryIndex.isWanted(filename)) {
++                    return@forEach
++                }
++
++                val entry = LibraryIndex.classify(filename)
++                val base = LibraryIndex.titleFrom(filename).ifBlank { filename }
++
++                when (entry.kind) {
++                    LibraryIndex.Kind.COMPRESSED -> {
++                        stats.compressed++
++                        side.add(
++                            Sidecar(filename, filePath, base, entry.reason, "compressed")
++                        )
++                        return@forEach
+                     }
++                    LibraryIndex.Kind.SPLIT_PART -> {
++                        side.add(
++                            Sidecar(filename, filePath, base, entry.reason, "split")
++                        )
++                        return@forEach
++                    }
++                    LibraryIndex.Kind.OTHER -> return@forEach
++                    else -> Unit
++                }
++
++                // getGame() разбирает заголовок через native. Один битый файл
++                // ронял весь обход (исключение из getIsValid/getProgramId
++                // шло наверх, а обход - в корутине, которая не ловила), и
++                // библиотека оставалась той частью, что успела прочитаться.
++                val game = runCatching { getGame(it.uri, true, false) }.getOrNull()
++                if (game == null) {
++                    stats.failed++
++                    side.add(
++                        Sidecar(
++                            filename, filePath, base,
++                            "ядро не прочитало заголовок · проверьте ключи или распакуйте файл",
++                            "unreadable"
++                        )
++                    )
++                    return@forEach
+                 }
++                when (entry.kind) {
++                    LibraryIndex.Kind.UPDATE -> stats.updates++
++                    LibraryIndex.Kind.DLC -> stats.dlc++
++                    else -> stats.games++
++                }
++                games.add(game)
+             }
+         }
+     }
+@@ -362,11 +492,18 @@ object GameHelper {
+         if (name.isEmpty()) {
+             name = FileUtil.getFilename(uri)
+         }
+-        var programId = GameMetadata.getProgramId(filePath)
++        var programId = runCatching { GameMetadata.getProgramId(filePath) }.getOrDefault("")
+ 
+-        // If the game's ID field is empty, use the filename without extension.
++        // Имя файла без расширения, но без `substring(0, -1)`.
++        //
++        // Здесь стояло `name.substring(0, name.lastIndexOf("."))`. У файла
++        // без точки - а `main` из распакованного дампа именно такой -
++        // lastIndexOf возвращает -1, и substring(0, -1) бросает
++        // StringIndexOutOfBoundsException прямо в середине обхода: список
++        // обрывался на том файле, до которого дошёл. Это и есть «видит
++        // одну игру», если «main» лежал рядом.
+         if (programId.isEmpty()) {
+-            programId = name.substring(0, name.lastIndexOf("."))
++            programId = name.substringBeforeLast('.', name).ifBlank { name }
+         }
+ 
+         val newGame = Game(
+@@ -379,9 +516,9 @@ object GameHelper {
+         )
+ 
+         if (addedToLibrary) {
+-            val addedTime = preferences.getLong(newGame.keyAddedToLibraryTime, 0L)
++            val addedTime = prefs.getLong(newGame.keyAddedToLibraryTime, 0L)
+             if (addedTime == 0L) {
+-                preferences.edit()
++                prefs.edit()
+                     .putLong(newGame.keyAddedToLibraryTime, System.currentTimeMillis())
+                     .apply()
+             }
+diff --git a/patch/android/utils/LivePanel.kt b/patch/android/utils/LivePanel.kt
+index 97a5546..ac772f0 100644
+--- a/patch/android/utils/LivePanel.kt
++++ b/patch/android/utils/LivePanel.kt
+@@ -17,7 +17,7 @@ import org.yuzu.yuzu_emu.model.Game
+  */
+ object LivePanel {
+ 
+-    const val BRIDGE_VERSION = 16
++    const val BRIDGE_VERSION = 17
+ 
+     private const val PANEL_URL = "https://sj0404-collab.github.io/symbiosis/library.html"
+ 
+@@ -101,6 +101,7 @@ object LivePanel {
+     fun gamesJson(): String {
+         val arr = JSONArray()
+         rememberedGames().forEach { g ->
++            val idx = runCatching { LibraryIndex.classify(g.path) }.getOrNull()
+             val probe = saveProbe(g)
+             val addons = runCatching { GameAddons.visibleFor(g) }.getOrDefault(emptyList())
+             arr.put(
+@@ -108,6 +109,19 @@ object LivePanel {
+                     put("title", g.title)
+                     put("path", g.path)
+                     put("programId", g.programId)
++                    // Что это на самом деле: игра, обновление или DLC.
++                    // Без этого панель показывала сорок DLC как сорок игр,
++                    // и «библиотека из одной игры» снова звучала правдой.
++                    put("runnable", true)
++                    put("kind", when (idx?.kind) {
++                        LibraryIndex.Kind.UPDATE -> "update"
++                        LibraryIndex.Kind.DLC -> "dlc"
++                        LibraryIndex.Kind.UNPACKED -> "unpacked"
++                        else -> "game"
++                    })
++                    if (idx != null && idx.titleId.isNotEmpty()) {
++                        put("baseTitleId", LibraryIndex.baseTitleId(idx.titleId))
++                    }
+                     put("developer", g.developer)
+                     put("saveDir", probe.path)
+                     put("hasSave", probe.bytes >= MIN_SAVE_BYTES)
+@@ -136,7 +150,115 @@ object LivePanel {
+                 }
+             )
+         }
+-        return JSONObject().put("games", arr).put("keys", keysPresent()).toString()
++        // Файлы, которые библиотека видит, но запустить не может.
++        //
++        // Это и есть ответ на «из сотен файлов видна одна»: сжатые nsz и
++        // непрочитанные образы больше не исчезают, а приходят в панель с
++        // причиной - её можно показать человеку, а не в лог.
++        runCatching { GameHelper.sidecar }.getOrDefault(emptyList()).forEach { it ->
++            val bytes = fileBytesOf(it.path)
++            arr.put(
++                JSONObject().apply {
++                    put("title", it.title.ifBlank { it.name })
++                    put("path", it.path)
++                    put("fileName", it.name)
++                    put("programId", "")
++                    put("developer", "")
++                    put("saveDir", "")
++                    put("hasSave", false)
++                    put("saveBytes", 0)
++                    put("saveSize", "")
++                    put("addons", JSONArray())
++                    put("titleId", "")
++                    put("version", "")
++                    put("fileBytes", bytes)
++                    put("fileSize", if (bytes > 0) GameFolderScanner.humanSize(bytes) else "")
++                    put("lastPlayed", 0)
++                    put("lastPlayedLabel", "")
++                    put("shaderBytes", 0)
++                    put("shaderSize", "")
++                    put("runnable", false)
++                    put("kind", it.kind)
++                    put("reason", it.reason)
++                }
++            )
++        }
++        val stats = runCatching { GameHelper.scanStats }.getOrNull()
++        return JSONObject()
++            .put("games", arr)
++            .put("keys", keysPresent())
++            .put("runnable", rememberedGames().size)
++            .put("sidecar", runCatching { GameHelper.sidecar.size }.getOrDefault(0))
++            .put("stats", statsJson(stats))
++            .toString()
++    }
++
++    /** Обход в цифрах: сколько файлов, что из них игра, что нет и почему. */
++    private fun statsJson(stats: GameHelper.ScanStats?): JSONObject = JSONObject().apply {
++        if (stats == null) {
++            put("known", false)
++            return@apply
++        }
++        put("known", true)
++        put("folders", stats.folders)
++        put("files", stats.files)
++        put("games", stats.games)
++        put("updates", stats.updates)
++        put("dlc", stats.dlc)
++        put("compressed", stats.compressed)
++        put("failed", stats.failed)
++        put("millis", stats.millis)
++        put("line", stats.line())
++    }
++
++    /**
++     * «Почему не видно» - один экран, который отвечает на вопрос целиком.
++     *
++     * Собирается из того же обхода, что и библиотека: файлов столько-то,
++     * игр столько-то, сжатых столько-то, не прочитано столько-то, вот эти
++     * файлы и вот эти причины словами. Раньше на этот вопрос отвечал лог,
++     * которого пользователь не видит.
++     */
++    fun libraryReport(context: Context): String {
++        val stats = runCatching { GameHelper.scanStats }.getOrNull()
++        val side = runCatching { GameHelper.sidecar }.getOrDefault(emptyList())
++        val byKind = side.groupingBy { it.kind }.eachCount()
++        val reasons = LinkedHashMap<String, Int>()
++        side.forEach { if (it.reason.isNotEmpty()) reasons.merge(it.reason, 1, Int::plus) }
++        val files = JSONArray()
++        side.take(40).forEach { it ->
++            files.put(
++                JSONObject().apply {
++                    put("name", it.name)
++                    put("title", it.title)
++                    put("path", it.path)
++                    put("kind", it.kind)
++                    put("reason", it.reason)
++                }
++            )
++        }
++        val reasonArr = JSONArray()
++        reasons.entries.sortedByDescending { it.value }.take(8).forEach { e ->
++            reasonArr.put(JSONObject().put("reason", e.key).put("count", e.value))
++        }
++        return JSONObject().apply {
++            put("stats", statsJson(stats))
++            put("byKind", JSONObject(byKind))
++            put("reasons", reasonArr)
++            put("files", files)
++            put("total", side.size)
++            put("keys", keysPresent())
++            put(
++                "headline",
++                when {
++                    stats == null -> "ещё ни одного полного обхода"
++                    stats.games == 0 && stats.compressed > 0 ->
++                        "игр нет, но ${stats.compressed} файлов сжаты - их распаковывает Конвертер"
++                    stats.games == 0 -> "в выбранных папках нет ни одного файла игры"
++                    else -> stats.line()
++                }
++            )
++        }.toString()
+     }
+ 
+     fun memoryJson(): String = runCatching {
