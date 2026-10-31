@@ -89,6 +89,16 @@ await shot('05-converted.png', fx, async (page) => {
   await page.waitForTimeout(300);
 });
 
+// Настоящий дамп без ключей: контейнер разобран, содержимое зашифровано.
+// Так выглядит папка с настоящими nsp/xci у человека, который ещё не положил
+// prod.keys, - и именно здесь раньше показывался шум из native.
+await shot('08-needs-keys.png', fx, async (page) => {
+  await page.evaluate(() => {
+    const g = GAMES.find((x) => x.needsKeys);
+    if (g) play(g);
+  });
+});
+
 await shot('06-dump-742.png', bigLib, async (page) => {
   await page.click('#tab-games');
   await page.waitForTimeout(200);

@@ -15,6 +15,8 @@
 
 export interface SymbiosisFile {
   name: string;
+  /** Запуск требует prod.keys: контейнер разобран, содержимое - нет. */
+  needsKeys?: boolean;
   /** Строка под названием. Пустая - не показывать ничего выдуманного. */
   developer?: string;
   /** Что получилось после распаковки — из tools/make-fixtures.py. */
@@ -199,7 +201,10 @@ export function fixturesToFiles(report: FixtureReport): SymbiosisFile[] {
     titleId: (/\[([0-9A-Fa-f]{16})]/.exec(f.name) ?? [])[1] ?? '',
     version: '',
     kind: f.kind,
-    runnable: f.runnable,
+    // Настоящий дамп без ключей запускается «в принципе», но не сейчас:
+    // страница покажет экран «нужны ключи» вместо ошибки ядра.
+    runnable: f.kind === 'unreadable' ? true : f.runnable,
+    needsKeys: f.kind === 'unreadable',
     reason: f.reason,
     bytes: f.bytes,
   }));
@@ -277,6 +282,7 @@ export function gamesJson(files: SymbiosisFile[]) {
     shaderSize: '',
     fileName: f.name,
     runnable: f.runnable,
+    needsKeys: f.needsKeys === true,
     kind: f.kind,
     reason: f.reason ?? '',
   }));

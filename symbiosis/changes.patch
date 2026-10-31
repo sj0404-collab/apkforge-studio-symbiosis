@@ -1,5 +1,5 @@
 diff --git a/docs/library.html b/docs/library.html
-index 9553244..5c33068 100644
+index 9553244..4dc70fc 100644
 --- a/docs/library.html
 +++ b/docs/library.html
 @@ -22,10 +22,27 @@
@@ -277,15 +277,18 @@ index 9553244..5c33068 100644
      setTimeout(() => fillIcon(i, g.path), 30 * i);
      if (g.lastShot) setTimeout(() => fillShot(i, g.lastShot), 40 * i);
    });
-@@ -647,6 +780,7 @@ function fillShot(i, path) {
+@@ -647,6 +780,10 @@ function fillShot(i, path) {
  
  function play(g) {
    if (!g || !g.path || !N() || !N().launch) return;
 +  if (g.runnable === false) { deadAction(g); return; }
++  // Ключей нет - запуск всё равно кончится ошибкой ядра. Сказать об этом
++  // здесь честнее, чем показать чужой traceback из native.
++  if (g.needsKeys) { keysNeeded(g); return; }
    const eng = parse(call('engines'), null);
    if (eng && eng.current && eng.current !== eng.launch) {
      HOLD = g;
-@@ -673,6 +807,82 @@ function play(g) {
+@@ -673,6 +810,104 @@ function play(g) {
    N().launch(g.path, g.title || '');
  }
  
@@ -330,6 +333,28 @@ index 9553244..5c33068 100644
 +  openSheet();
 +}
 +
++// Файл читается, но без ключей консоли не расшифруется.
++//
++// Настоящий дамп без prod.keys ведёт себя именно так: контейнер разобран,
++// заголовок прочитан, а содержимое - нет. Запуск в этом состоянии даёт
++// ошибку ядра, и лучше объяснить её заранее, чем показывать пользователю
++// строку из native.
++function keysNeeded(g) {
++  HOLD = g;
++  $('sheet-title').textContent = g.title || 'Игра';
++  $('sheet-note').textContent =
++    'Файл разобран, но содержимое зашифровано. Нужны ключи консоли (prod.keys) ' +
++    'и прошивка: без них ядро не запустит ни один дамп, а не только этот.';
++  $('sheet-actions').innerHTML =
++    '<button class="go" id="a-keys">Открыть ключи</button>' +
++    '<button class="ghost" id="a-close">Закрыть</button>';
++  const open = $('a-keys');
++  if (open) open.onclick = () => { closeSheet(); if (N() && N().openUtilities) N().openUtilities(); };
++  const close = $('a-close');
++  if (close) close.onclick = closeSheet;
++  openSheet();
++}
++
 +// «Почему не видно» - ответ цифрами и причинами, а не ссылкой на лог.
 +function whyNot() {
 +  const rep = parse(call('libraryReport'), null);
@@ -368,7 +393,7 @@ index 9553244..5c33068 100644
  function holdMenu(g) {
    HOLD = g;
    $('sheet-title').textContent = g.title || 'Игра';
-@@ -845,7 +1055,10 @@ function renderLauncher() {
+@@ -845,7 +1080,10 @@ function renderLauncher() {
  
    rail.innerHTML = RAIL_LIST.map((g, i) => {
      const gi = GAMES.indexOf(g);
@@ -380,7 +405,7 @@ index 9553244..5c33068 100644
    }).join('');
    rail.querySelectorAll('.slide').forEach(el => {
      el.addEventListener('click', () => {
-@@ -919,7 +1132,7 @@ function paintDock() {
+@@ -919,7 +1157,7 @@ function paintDock() {
        <h2>${esc(g.title || 'без имени')}</h2>
        <div class="who">${esc(g.developer || '')}${g.titleId ? ' · ' + esc(g.titleId) : ''}${g.fileSize ? ' · ' + esc(g.fileSize) : ''}${g.version ? ' · ' + esc(g.version) : ''}</div>
        <div class="pos">${LAUNCH_I + 1} / ${RAIL_LIST.length}</div>
@@ -389,7 +414,7 @@ index 9553244..5c33068 100644
      </div>
      <div class="dock-body">
        <div class="facts">
-@@ -940,7 +1153,7 @@ function paintDock() {
+@@ -940,7 +1178,7 @@ function paintDock() {
          <button class="ghost" id="dock-aaa">AAA минимум</button>
        </div>
      </div>`;
@@ -398,7 +423,7 @@ index 9553244..5c33068 100644
    $('dock-shots-btn').onclick = () => openShots(g);
    $('dock-props').onclick = () => { if (N() && N().openGameMenu) N().openGameMenu(g.path); };
    $('dock-aaa').onclick = () => {
-@@ -1141,13 +1354,33 @@ function fillDockShots(g) {
+@@ -1141,13 +1379,33 @@ function fillDockShots(g) {
    });
  }
  
@@ -433,7 +458,7 @@ index 9553244..5c33068 100644
  function loadStatus() {
    const st = parse(call('status'), null);
    const folders = parse(call('folders'), { folders: [] }).folders || [];
-@@ -1161,7 +1394,10 @@ function loadStatus() {
+@@ -1161,7 +1419,10 @@ function loadStatus() {
      (totalGames ? ` · <b>${totalGames}</b> игр` : '') +
      (totalSize ? ` · ${esc(totalSize)}` : '');
    const folderChips = folders.length
@@ -445,7 +470,7 @@ index 9553244..5c33068 100644
      : '<span class="chip">папка не выбрана</span>';
    const saveChip = SAVES.path
      ? `<span class="chip tap" id="chip-saves">сейвы · ${esc(SAVES.name || 'папка')} · ${SAVES.titles || 0}${SAVES.size ? ' · ' + esc(SAVES.size) : ''}</span>`
-@@ -1178,7 +1414,9 @@ function loadStatus() {
+@@ -1178,7 +1439,9 @@ function loadStatus() {
      };
    });
    const folderBar = folders.length
@@ -456,7 +481,7 @@ index 9553244..5c33068 100644
      : 'папка игр не выбрана — «＋ Папка»';
    const saveBar = SAVES.path
      ? `сейвы: <b>${esc(SAVES.name || SAVES.path)}</b> · ${SAVES.titles || 0}`
-@@ -1725,6 +1963,11 @@ function paintKenjiBar(data) {
+@@ -1725,6 +1988,11 @@ function paintKenjiBar(data) {
    }
  }
  
@@ -468,7 +493,7 @@ index 9553244..5c33068 100644
  function renderKenjiGrid() {
    const box = $('k-grid');
    if (!box) return;
-@@ -1807,7 +2050,20 @@ if ($('k-plug')) $('k-plug').onclick = () => {
+@@ -1807,7 +2075,20 @@ if ($('k-plug')) $('k-plug').onclick = () => {
  };
  $('sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
  
@@ -491,7 +516,7 @@ index 9553244..5c33068 100644
  loadStatus();
  applyPlugins();
 diff --git a/patch/android/assets/library.html b/patch/android/assets/library.html
-index 9553244..5c33068 100644
+index 9553244..4dc70fc 100644
 --- a/patch/android/assets/library.html
 +++ b/patch/android/assets/library.html
 @@ -22,10 +22,27 @@
@@ -769,15 +794,18 @@ index 9553244..5c33068 100644
      setTimeout(() => fillIcon(i, g.path), 30 * i);
      if (g.lastShot) setTimeout(() => fillShot(i, g.lastShot), 40 * i);
    });
-@@ -647,6 +780,7 @@ function fillShot(i, path) {
+@@ -647,6 +780,10 @@ function fillShot(i, path) {
  
  function play(g) {
    if (!g || !g.path || !N() || !N().launch) return;
 +  if (g.runnable === false) { deadAction(g); return; }
++  // Ключей нет - запуск всё равно кончится ошибкой ядра. Сказать об этом
++  // здесь честнее, чем показать чужой traceback из native.
++  if (g.needsKeys) { keysNeeded(g); return; }
    const eng = parse(call('engines'), null);
    if (eng && eng.current && eng.current !== eng.launch) {
      HOLD = g;
-@@ -673,6 +807,82 @@ function play(g) {
+@@ -673,6 +810,104 @@ function play(g) {
    N().launch(g.path, g.title || '');
  }
  
@@ -822,6 +850,28 @@ index 9553244..5c33068 100644
 +  openSheet();
 +}
 +
++// Файл читается, но без ключей консоли не расшифруется.
++//
++// Настоящий дамп без prod.keys ведёт себя именно так: контейнер разобран,
++// заголовок прочитан, а содержимое - нет. Запуск в этом состоянии даёт
++// ошибку ядра, и лучше объяснить её заранее, чем показывать пользователю
++// строку из native.
++function keysNeeded(g) {
++  HOLD = g;
++  $('sheet-title').textContent = g.title || 'Игра';
++  $('sheet-note').textContent =
++    'Файл разобран, но содержимое зашифровано. Нужны ключи консоли (prod.keys) ' +
++    'и прошивка: без них ядро не запустит ни один дамп, а не только этот.';
++  $('sheet-actions').innerHTML =
++    '<button class="go" id="a-keys">Открыть ключи</button>' +
++    '<button class="ghost" id="a-close">Закрыть</button>';
++  const open = $('a-keys');
++  if (open) open.onclick = () => { closeSheet(); if (N() && N().openUtilities) N().openUtilities(); };
++  const close = $('a-close');
++  if (close) close.onclick = closeSheet;
++  openSheet();
++}
++
 +// «Почему не видно» - ответ цифрами и причинами, а не ссылкой на лог.
 +function whyNot() {
 +  const rep = parse(call('libraryReport'), null);
@@ -860,7 +910,7 @@ index 9553244..5c33068 100644
  function holdMenu(g) {
    HOLD = g;
    $('sheet-title').textContent = g.title || 'Игра';
-@@ -845,7 +1055,10 @@ function renderLauncher() {
+@@ -845,7 +1080,10 @@ function renderLauncher() {
  
    rail.innerHTML = RAIL_LIST.map((g, i) => {
      const gi = GAMES.indexOf(g);
@@ -872,7 +922,7 @@ index 9553244..5c33068 100644
    }).join('');
    rail.querySelectorAll('.slide').forEach(el => {
      el.addEventListener('click', () => {
-@@ -919,7 +1132,7 @@ function paintDock() {
+@@ -919,7 +1157,7 @@ function paintDock() {
        <h2>${esc(g.title || 'без имени')}</h2>
        <div class="who">${esc(g.developer || '')}${g.titleId ? ' · ' + esc(g.titleId) : ''}${g.fileSize ? ' · ' + esc(g.fileSize) : ''}${g.version ? ' · ' + esc(g.version) : ''}</div>
        <div class="pos">${LAUNCH_I + 1} / ${RAIL_LIST.length}</div>
@@ -881,7 +931,7 @@ index 9553244..5c33068 100644
      </div>
      <div class="dock-body">
        <div class="facts">
-@@ -940,7 +1153,7 @@ function paintDock() {
+@@ -940,7 +1178,7 @@ function paintDock() {
          <button class="ghost" id="dock-aaa">AAA минимум</button>
        </div>
      </div>`;
@@ -890,7 +940,7 @@ index 9553244..5c33068 100644
    $('dock-shots-btn').onclick = () => openShots(g);
    $('dock-props').onclick = () => { if (N() && N().openGameMenu) N().openGameMenu(g.path); };
    $('dock-aaa').onclick = () => {
-@@ -1141,13 +1354,33 @@ function fillDockShots(g) {
+@@ -1141,13 +1379,33 @@ function fillDockShots(g) {
    });
  }
  
@@ -925,7 +975,7 @@ index 9553244..5c33068 100644
  function loadStatus() {
    const st = parse(call('status'), null);
    const folders = parse(call('folders'), { folders: [] }).folders || [];
-@@ -1161,7 +1394,10 @@ function loadStatus() {
+@@ -1161,7 +1419,10 @@ function loadStatus() {
      (totalGames ? ` · <b>${totalGames}</b> игр` : '') +
      (totalSize ? ` · ${esc(totalSize)}` : '');
    const folderChips = folders.length
@@ -937,7 +987,7 @@ index 9553244..5c33068 100644
      : '<span class="chip">папка не выбрана</span>';
    const saveChip = SAVES.path
      ? `<span class="chip tap" id="chip-saves">сейвы · ${esc(SAVES.name || 'папка')} · ${SAVES.titles || 0}${SAVES.size ? ' · ' + esc(SAVES.size) : ''}</span>`
-@@ -1178,7 +1414,9 @@ function loadStatus() {
+@@ -1178,7 +1439,9 @@ function loadStatus() {
      };
    });
    const folderBar = folders.length
@@ -948,7 +998,7 @@ index 9553244..5c33068 100644
      : 'папка игр не выбрана — «＋ Папка»';
    const saveBar = SAVES.path
      ? `сейвы: <b>${esc(SAVES.name || SAVES.path)}</b> · ${SAVES.titles || 0}`
-@@ -1725,6 +1963,11 @@ function paintKenjiBar(data) {
+@@ -1725,6 +1988,11 @@ function paintKenjiBar(data) {
    }
  }
  
@@ -960,7 +1010,7 @@ index 9553244..5c33068 100644
  function renderKenjiGrid() {
    const box = $('k-grid');
    if (!box) return;
-@@ -1807,7 +2050,20 @@ if ($('k-plug')) $('k-plug').onclick = () => {
+@@ -1807,7 +2075,20 @@ if ($('k-plug')) $('k-plug').onclick = () => {
  };
  $('sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
  
