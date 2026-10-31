@@ -1,0 +1,54 @@
+{
+  "generated_by": "tools/make-fixtures.py",
+  "files": [
+    {
+      "name": "Sonic Mania [01004E300BD5C000][v0].nsp",
+      "path": "Games/Sonic Mania [01004E300BD5C000][v0].nsp",
+      "bytes": 139407,
+      "sha256": "9525f64ea719cd0108390a4fcea7c9d3c53746e7330ee16d68b2ff9496f70162",
+      "format": "nsp",
+      "note": "PFS0 с двумя NCA",
+      "kind": "unreadable",
+      "reason": "ядро не прочитало заголовок · проверьте ключи или распакуйте файл",
+      "runnable": false
+    },
+    {
+      "name": "Metroid Dread [010093801237C000][v0].xci",
+      "path": "Games/Metroid Dread [010093801237C000][v0].xci",
+      "bytes": 132096,
+      "sha256": "60dc4b673d21fbd6be990ead7879b9744449c9e9d6afbb4e1270149cd1cafe8e",
+      "format": "xci",
+      "note": "геймкартридж с партицией secure",
+      "kind": "unreadable",
+      "reason": "ядро не прочитало заголовок · проверьте ключи или распакуйте файл",
+      "runnable": false,
+      "converted": {
+        "name": "Metroid Dread [010093801237C000][v0].nsp",
+        "bytes": 114805,
+        "sha256": "f9b8d68a408cc3e763c0abf29f676d79c434bcb57006176ba410750c55581cca",
+        "format": "nsp"
+      }
+    },
+    {
+      "name": "Hollow Knight [0100633007D48000][v0].nsz",
+      "path": "Games/Hollow Knight [0100633007D48000][v0].nsz",
+      "bytes": 17685,
+      "sha256": "2744fd05f1322aabd8ccc2802b81b6ecb84d3be962106c27ef2ed7651c2f8479",
+      "format": "nsz",
+      "note": "PFS0 с NCZ внутри, блоки zstd",
+      "kind": "compressed",
+      "reason": "сжатый образ · сначала «Распаковать» во вкладке Конвертер",
+      "runnable": false,
+      "converted": {
+        "name": "Hollow Knight [0100633007D48000][v0].nsp",
+        "bytes": 32845,
+        "sha256": "d35288a16c5ff9a7cd5623464a9c6b20903abffa013eb1776be01567322a8a30",
+        "format": "nsp"
+      }
+    }
+  ],
+  "summary": {
+    "files": 3,
+    "bytes": 289188
+  }
+}

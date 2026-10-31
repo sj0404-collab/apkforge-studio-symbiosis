@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, FlaskConical, Play, RefreshCw, RotateCcw } from 'lucide-react';
 import { useStudio } from '../lib/studio';
 import {
-  AUDIT_SCRIPT,
   DEFAULT_LIBRARY,
   buildLibrary,
+  fixturesToFiles,
   pageWithBridge,
   summarise,
+  type FixtureFile,
+  type FixtureReport,
   type LibraryOptions,
   type SymbiosisFile,
 } from '../lib/symbiosis';
@@ -18,6 +20,7 @@ interface Check {
 }
 
 const PRESETS: { id: string; label: string; options: LibraryOptions }[] = [
+  { id: 'fixtures', label: 'папка Games (3 файла)', options: DEFAULT_LIBRARY },
   { id: 'normal', label: '24 игры', options: DEFAULT_LIBRARY },
   {
     id: 'dump',
@@ -39,13 +42,20 @@ export function SymbiosisLab() {
   const [checks, setChecks] = useState<Check[] | null>(null);
   const [running, setRunning] = useState(false);
   const [nonce, setNonce] = useState(0);
+  const [fixtures, setFixtures] = useState<FixtureFile[] | null>(null);
   const frame = useRef<HTMLIFrameElement | null>(null);
 
   const options = useMemo(
     () => PRESETS.find((p) => p.id === preset)?.options ?? DEFAULT_LIBRARY,
     [preset],
   );
-  const files: SymbiosisFile[] = useMemo(() => buildLibrary(options), [options]);
+  const files: SymbiosisFile[] = useMemo(() => {
+    // «Папка Games» - настоящие файлы из public/fixtures, записанные
+    // tools/make-fixtures.py: NSP, XCI и NSZ с корректной структурой
+    // контейнеров. Всё остальное - синтетическая библиотека для масштаба.
+    if (preset === 'fixtures') return fixturesToFiles({ files: fixtures ?? [], summary: { files: 0, bytes: 0 } });
+    return buildLibrary(options);
+  }, [options, preset, fixtures]);
   const stats = useMemo(() => summarise(files), [files]);
 
   useEffect(() => {
@@ -67,45 +77,74 @@ export function SymbiosisLab() {
     };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    fetch(`${import.meta.env.BASE_URL}fixtures/library.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: FixtureReport | null) => {
+        if (alive) setFixtures(data?.files ?? []);
+      })
+      .catch(() => {
+        if (alive) setFixtures([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const doc = useMemo(() => (html ? pageWithBridge(html, files) : ''), [html, files]);
+
+  // Ответ приходит сообщением из самого фрейма: он песочный, и читать его
+  // window напрямую родителю нельзя (это ловилось ошибкой «Blocked a frame
+  // from accessing a cross-origin frame»). Таймаут - чтобы кнопка не висела
+  // вечно, если страница не поднялась.
+  useEffect(() => {
+    const onMessage = (ev: MessageEvent) => {
+      const data = ev.data as { __lab?: string; results?: Check[] } | null;
+      if (!data || data.__lab !== 'result' || !Array.isArray(data.results)) return;
+      setRunning(false);
+      setChecks(data.results);
+      const failed = data.results.filter((c) => !c.ok);
+      pushTerminal(
+        `symbiosis-lab: ${data.results.length - failed.length}/${data.results.length} проверок прошло`,
+        failed.length ? 'err' : 'ok',
+      );
+      failed.forEach((c) => pushTerminal(`  FAIL ${c.name} — ${c.detail}`, 'err'));
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [pushTerminal]);
 
   const runAudit = useCallback(() => {
     const win = frame.current?.contentWindow;
     if (!win) return;
+    const expected = {
+      total: stats.files,
+      compressed: stats.compressed,
+      runnable: files.filter((f) => f.runnable).length,
+      notRunnable: files.filter((f) => !f.runnable).length,
+      dlc: stats.dlc,
+      updates: stats.updates,
+    };
     setRunning(true);
     try {
-      const expected = {
-        total: stats.files,
-        compressed: stats.compressed,
-        runnable: files.filter((f) => f.runnable).length,
-        notRunnable: files.filter((f) => !f.runnable).length,
-        dlc: stats.dlc,
-        updates: stats.updates,
-      };
-      // Indirect eval in the page's realm: GAMES / railGames() / whyNot() here
-      // are the shipped ones, not copies made by the test.
-      // `Window` in lib.dom has no `eval`; the value is a function in the
-      // iframe's realm, which is exactly what we need.
-      const runEval = (win as unknown as { eval: (src: string) => unknown }).eval;
-      const raw = runEval.call(
-        win,
-        `window.__labExpected = ${JSON.stringify(expected)}; ${AUDIT_SCRIPT}`,
-      );
-      const parsed = JSON.parse(String(raw)) as Check[];
-      setChecks(parsed);
-      const failed = parsed.filter((c) => !c.ok);
-      pushTerminal(
-        `symbiosis-lab: ${parsed.length - failed.length}/${parsed.length} проверок прошло`,
-        failed.length ? 'err' : 'ok',
-      );
-      failed.forEach((c) => pushTerminal(`  FAIL ${c.name} — ${c.detail}`, 'err'));
+      win.postMessage({ __lab: 'run', expected }, '*');
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
+      setRunning(false);
       setChecks([{ name: 'запуск проверок', ok: false, detail: msg }]);
       pushTerminal(`symbiosis-lab: проверки не запустились — ${msg}`, 'err');
-    } finally {
-      setRunning(false);
+      return;
     }
+    window.setTimeout(() => {
+      setRunning((was) => {
+        if (was) {
+          setChecks([{ name: 'ответ страницы', ok: false, detail: 'страница не ответила за 5 с' }]);
+          pushTerminal('symbiosis-lab: страница не ответила за 5 с', 'err');
+        }
+        return false;
+      });
+    }, 5000);
   }, [files, pushTerminal, stats]);
 
   const passed = checks?.filter((c) => c.ok).length ?? 0;

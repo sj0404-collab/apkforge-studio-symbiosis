@@ -60,8 +60,11 @@ for (const [label, options] of presets) {
   console.log(`\n── ${label}: ${stats.line}`);
   let checks = [];
   try {
-    const raw = window.eval(`window.__labExpected = ${JSON.stringify(expected)}; ${lib.AUDIT_SCRIPT}`);
-    checks = JSON.parse(raw);
+    // Тот же вызов, что делает студия, только транспорт другой: в jsdom
+    // фрейм не песочный, поэтому можно позвать напрямую то, что скрипт
+    // аудита кладёт в страницу.
+    const raw = window.__runLabAudit(expected);
+    checks = raw;
   } catch (e) {
     checks = [{ name: 'страница выполнилась', ok: false, detail: `исключение при проверке: ${e.message}` }];
   }

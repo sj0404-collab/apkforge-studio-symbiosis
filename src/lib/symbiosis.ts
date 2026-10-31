@@ -15,6 +15,10 @@
 
 export interface SymbiosisFile {
   name: string;
+  /** Строка под названием. Пустая - не показывать ничего выдуманного. */
+  developer?: string;
+  /** Что получилось после распаковки — из tools/make-fixtures.py. */
+  converted?: { name: string; bytes: number; format: string };
   titleId: string;
   version: string;
   kind: 'game' | 'update' | 'dlc' | 'compressed' | 'split' | 'unreadable';
@@ -44,6 +48,20 @@ export const DEFAULT_LIBRARY: LibraryOptions = {
   noStorage: true,
 };
 
+function humanSize(bytes: number): string {
+  if (bytes <= 0) return '0 КБ';
+  // Русская типографика: разделитель - запятая, и на терабайтах «2392,8 ГБ»
+  // читается хуже, чем «2,3 ТБ».
+  const ru = (v: number, digits = 1) => v.toFixed(digits).replace('.', ',');
+  const tb = bytes / 1_099_511_627_776;
+  if (tb >= 1) return `${ru(tb)} ТБ`;
+  const gb = bytes / 1_073_741_824;
+  if (gb >= 1) return `${ru(gb)} ГБ`;
+  const mb = bytes / 1_048_576;
+  if (mb >= 1) return `${ru(mb, 0)} МБ`;
+  return `${Math.max(1, Math.round(bytes / 1024))} КБ`;
+}
+
 function hex(n: number, pad = 16) {
   return n.toString(16).toUpperCase().padStart(pad, '0');
 }
@@ -71,7 +89,7 @@ export function buildLibrary(options: LibraryOptions = DEFAULT_LIBRARY): Symbios
     out.push({
       name: `${title} [${base}][v0].nsp`,
       titleId: base,
-      version: '0.0.0',
+      version: '',
       kind: 'game',
       runnable: true,
       bytes: 1_900_000_000 + i * 7_000_000,
@@ -105,7 +123,7 @@ export function buildLibrary(options: LibraryOptions = DEFAULT_LIBRARY): Symbios
     out.push({
       name: `Dump ${i + 1} [${base}][v0].${ext}`,
       titleId: base,
-      version: '0.0.0',
+      version: '',
       kind: 'compressed',
       runnable: false,
       reason: 'сжатый образ · сначала «Распаковать» во вкладке Конвертер',
@@ -119,7 +137,7 @@ export function buildLibrary(options: LibraryOptions = DEFAULT_LIBRARY): Symbios
       out.push({
         name: `Split Game ${i + 1} [${base}][v0].nsp.${part}`,
         titleId: base,
-        version: '0.0.0',
+        version: '',
         kind: 'split',
         runnable: false,
         reason: 'часть разрезанного образа - склеивается с соседними',
@@ -142,6 +160,49 @@ export function buildLibrary(options: LibraryOptions = DEFAULT_LIBRARY): Symbios
   }
 
   return out;
+}
+
+/** One entry of `fixtures/library.json`, written by tools/make-fixtures.py. */
+export interface FixtureFile {
+  name: string;
+  path: string;
+  bytes: number;
+  sha256: string;
+  format: string;
+  kind: 'compressed' | 'unreadable' | 'split';
+  reason: string;
+  runnable: boolean;
+  note?: string;
+  converted?: { name: string; bytes: number; sha256: string; format: string };
+}
+
+export interface FixtureReport {
+  files: FixtureFile[];
+  summary: { files: number; bytes: number };
+}
+
+/**
+ * Fixtures → the shape the page expects.
+ *
+ * These are the only files in this repo that exist on disk: a real NSP, XCI
+ * and NSZ written by `tools/make-fixtures.py`, byte-for-byte what their own
+ * `rom_tools.cpp` reads. The page therefore shows real names, real sizes and
+ * the honest verdict for a dump without keys — not invented metadata.
+ */
+export function fixturesToFiles(report: FixtureReport): SymbiosisFile[] {
+  return (report.files ?? []).map((f) => ({
+    name: f.name,
+    developer: `папка Games · ${f.format}`,
+    converted: f.converted
+      ? { name: f.converted.name, bytes: f.converted.bytes, format: f.converted.format }
+      : undefined,
+    titleId: (/\[([0-9A-Fa-f]{16})]/.exec(f.name) ?? [])[1] ?? '',
+    version: '',
+    kind: f.kind,
+    runnable: f.runnable,
+    reason: f.reason,
+    bytes: f.bytes,
+  }));
 }
 
 export interface LibraryStats {
@@ -168,10 +229,15 @@ export function summarise(files: SymbiosisFile[]): LibraryStats {
     if (m10 >= 2 && m10 <= 4) return few;
     return many;
   };
-  const parts = [`${files.length} файлов`, `${games} ${plural(games, 'игра', 'игры', 'игр')}`];
+  const parts = [
+    `${files.length} ${plural(files.length, 'файл', 'файла', 'файлов')}`,
+    `${games} ${plural(games, 'игра', 'игры', 'игр')}`,
+  ];
   if (updates) parts.push(`${updates} обновл.`);
   if (dlc) parts.push(`${dlc} DLC`);
-  if (compressed) parts.push(`${compressed} сжатых → Конвертер`);
+  if (compressed) {
+    parts.push(`${compressed} ${plural(compressed, 'сжатый', 'сжатых', 'сжатых')} → Конвертер`);
+  }
   if (other) parts.push(`${other} прочих`);
   return {
     files: files.length,
@@ -187,10 +253,14 @@ export function summarise(files: SymbiosisFile[]): LibraryStats {
 /** The JSON the page receives from `Symbiosis.games()`. */
 export function gamesJson(files: SymbiosisFile[]) {
   const games = files.map((f, i) => ({
-    title: f.name.replace(/\s*\[[^\]]*]/g, ' ').replace(/\s+/g, ' ').trim(),
+    title: f.name
+      .replace(/\[[^\]]*]/g, ' ')
+      .replace(/\.[A-Za-z0-9]{2,4}$/, '')
+      .replace(/\s+/g, ' ')
+      .trim(),
     path: `content://com.android.externalstorage.documents/document/primary%3AGames%2F${encodeURIComponent(f.name)}`,
     programId: f.titleId,
-    developer: f.kind === 'dlc' ? 'DLC' : 'Symbiosis Lab',
+    developer: f.developer ?? (f.kind === 'dlc' ? 'DLC' : ''),
     saveDir: '',
     hasSave: f.kind === 'game' && i % 4 === 0,
     saveBytes: f.kind === 'game' && i % 4 === 0 ? 3_000_000 : 0,
@@ -199,7 +269,7 @@ export function gamesJson(files: SymbiosisFile[]) {
     titleId: f.titleId,
     version: f.version,
     fileBytes: f.bytes,
-    fileSize: `${(f.bytes / 1e9).toFixed(1)} GB`,
+    fileSize: humanSize(f.bytes),
     lastPlayed: f.kind === 'game' && i % 5 === 0 ? Date.now() - i * 86_400_000 : 0,
     lastPlayedLabel: '',
     playSeconds: f.kind === 'game' && i % 5 === 0 ? 3600 + i : 0,
@@ -299,25 +369,54 @@ export function buildBridge(files: SymbiosisFile[]) {
     libraryReport: function(){ rec('libraryReport'); return ${JSON.stringify(report)}; },
     status: function(){
       rec('status');
+      // Полоса статуса не должна врать: «Игры ✓» при нуле игр — именно то,
+      // из-за чего жалоба «ключи и прошивка зелёные, а игр нет» звучала
+      // загадкой. Папка и игры - два разных факта и две разные строки.
+      var games = ${JSON.stringify(summarise(files).games)};
       return JSON.stringify({ items: [
-        { label: 'Ключи', present: true }, { label: 'Прошивка', present: true },
-        { label: 'Игры', present: true }
+        { label: 'Ключи', present: true },
+        { label: 'Прошивка', present: true },
+        { label: 'Папка', present: ${JSON.stringify(files.length)} > 0 },
+        { label: 'Игры', present: games > 0 }
       ], dataRoot: '/storage/emulated/0/eden' });
     },
     folders: function(){
       rec('folders');
+      // Размер и число файлов - из самих файлов. Раньше здесь стояло
+      // '42 GB' строкой, и панель честно печатала выдуманное число.
       return JSON.stringify({ folders: [
-        { uri: 'content://tree/games', name: 'Games', games: ${JSON.stringify(
-          summarise(files).games,
-        )}, bytes: ${JSON.stringify(files.reduce((n, f) => n + f.bytes, 0))}, size: '42 GB', skipped: 0, unreadable: false, compressed: ${JSON.stringify(
-          summarise(files).compressed,
-        )} }
+        { uri: 'content://tree/games', name: 'Games',
+          games: ${JSON.stringify(summarise(files).games)},
+          files: ${JSON.stringify(files.length)},
+          compressed: ${JSON.stringify(summarise(files).compressed)},
+          bytes: ${JSON.stringify(files.reduce((n, f) => n + f.bytes, 0))},
+          size: ${JSON.stringify(humanSize(files.reduce((n, f) => n + f.bytes, 0)))},
+          skipped: 0, unreadable: false }
       ] });
     },
     memory: function(){ rec('memory'); return JSON.stringify({ leftMb: 2600, usedMb: 5400, budgetMb: 8000, warn: false }); },
     saveSource: function(){ return JSON.stringify({ path: '', titles: 0, name: '', size: '' }); },
     engines: function(){ return JSON.stringify({ current: 'eden', launch: 'eden' }); },
-    converterItems: function(){ rec('converterItems'); return JSON.stringify({ items: [] }); },
+    converterItems: function(){
+      rec('converterItems');
+      // Настоящий выход конвертера: файл, который make-fixtures.py собрал из
+      // NSZ тем же алгоритмом, что rom_tools.cpp. Без ключей ядро и его не
+      // прочитает - приложение так и говорит, вместо выдуманного «готово».
+      return JSON.stringify({ items: ${JSON.stringify(
+        files
+          .filter((f) => f.converted)
+          .map((f) => ({
+            canLaunch: false,
+            name: f.converted!.name,
+            title: f.converted!.name.replace(/\s*\[[^\]]*]/g, ' ').replace(/\.[a-z0-9]{2,4}$/i, '').trim(),
+            path: `content://tree/games/${f.converted!.name}`,
+            bytes: f.converted!.bytes,
+            size: humanSize(f.converted!.bytes),
+            reason: 'ядро не прочитало заголовок · нужны ключи консоли',
+            message: 'ядро не прочитало заголовок · нужны ключи консоли',
+          })),
+      )} });
+    },
     icon: function(){ return ''; },
     shot: function(){ return ''; },
     cover: function(){ return ''; },
@@ -368,8 +467,9 @@ export function pageWithBridge(html: string, files: SymbiosisFile[], extraShim =
   // Before the page's own <script> — the page calls the bridge while parsing.
   const marker = '<script>\n';
   const at = html.lastIndexOf(marker);
-  if (at < 0) return inject + html;
-  return html.slice(0, at) + inject + '\n' + html.slice(at);
+  const withBridge = at < 0 ? inject + html : html.slice(0, at) + inject + '\n' + html.slice(at);
+  // Аудит добавляется в конец: ему нужны функции страницы, а не наоборот.
+  return withBridge.replace('</body>', `${auditFrameScript()}\n</body>`);
 }
 
 export interface AuditCheck {
@@ -524,6 +624,51 @@ export const AUDIT_SCRIPT = `
   return JSON.stringify(out);
 })();
 `;
+
+/**
+ * Аудит, который исполняется внутри страницы и отвечает через postMessage.
+ *
+ * Почему не `frame.contentWindow.eval`: iframe в студии песочный
+ * (`sandbox="allow-scripts"` без `allow-same-origin`), у него непрозрачный
+ * origin, и родитель не имеет права даже читать его window — попытка падает
+ * с «Blocked a frame from accessing a cross-origin frame». Раньше проверки
+ * поэтому работали только в JSDOM, а в браузере кнопка молча ничего не
+ * делала (скриншот это и показал).
+ *
+ * Здесь наоборот: скрипт кладётся в документ, слушает сообщение и отвечает
+ * тем же каналом. Песочница остаётся строгой.
+ */
+export function auditFrameScript(): string {
+  // Текст аудита кладётся в документ как строка в двойных кавычках,
+  // собранная JSON.stringify: он экранирует всё, что могло бы закрыть
+  // шаблон, и не требует ручной возни с бэкслешами.
+  const auditLiteral = JSON.stringify(AUDIT_SCRIPT);
+  return `<script>
+var AUDIT = ${auditLiteral};
+(function(){
+  function run(expected){
+    window.__labExpected = expected;
+    try {
+      if (typeof GAMES === 'undefined') {
+        return [{ name: 'страница поднялась', ok: false, detail: 'скрипт страницы не выполнился' }];
+      }
+      return JSON.parse(eval(AUDIT));
+    } catch (e) {
+      return [{ name: 'проверки', ok: false, detail: 'исключение: ' + (e && e.message) }];
+    }
+  }
+  window.__runLabAudit = run;
+  window.addEventListener('message', function(ev){
+    var d = ev.data || {};
+    if (d.__lab !== 'run') return;
+    var results = run(d.expected || {});
+    try {
+      window.parent.postMessage({ __lab: 'result', results: results }, '*');
+    } catch (e) {}
+  });
+})();
+</script>`;
+}
 
 export const AUDIT_HELP = `Symbiosis Lab loads the emulator's real library page in an iframe with a
 synthetic bridge: 24 games, 24 updates, 16 DLC, 180 compressed dumps, 3 files
