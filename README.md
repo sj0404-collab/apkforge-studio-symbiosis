@@ -73,6 +73,11 @@ ok  ни одна строка не пустая
 
 ## Правки к Symbiosis
 
+Живут там же, где код: **ветка `fix/library-sees-all-games`, PR #3** в
+[sj0404-collab/symbiosis](https://github.com/sj0404-collab/symbiosis/pull/3).
+Их собственный прогон `Tests` на этой ветке: `passed=36 failed=0 skipped=3`,
+`LibraryIndexTest — passed=65 failed=0`.
+
 ```
 symbiosis/changes.patch     # git diff против текущего main
 symbiosis/files/...         # те же файлы целиком
@@ -98,6 +103,7 @@ git apply /path/to/symbiosis/changes.patch
 | `patch/android/fragments/LivePanelFragment.kt` | мост: `convertPath()`, `libraryReport()`; версия моста 17 |
 | `docs/library.html` + `patch/android/assets/library.html` | бейджи, фильтр «Не запускается», сводка, экран «почему?», кнопка «Распаковать» |
 | `tests/LibraryIndexTest.kt` | **новый**: 65 проверок, включая сверку с исходниками |
+| `tools/run_tests.sh` | Kotlin-тест собирается со своими зависимостями; ошибка сборки печатается, а не глотается |
 
 Подробности — `docs/BUGS-FOUND.md`.
 
