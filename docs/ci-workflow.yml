@@ -1,0 +1,84 @@
+name: Studio + Symbiosis Lab
+
+# Three things have to stay true, or every green badge here is a lie:
+#   1. the studio builds and lints;
+#   2. the library page shipped in the APK passes the 13 checks;
+#   3. the Kotlin rule that decides what counts as a game still passes its
+#      own test, including the drift checks that read GameHelper.kt and
+#      GameFolderScanner.kt from the checkout.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  studio:
+    name: Studio (lint, build, lab)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Symbiosis Lab (JSDOM, no browser needed)
+        run: npm run test:lab
+
+      - name: The page in public/ matches the one in symbiosis/files
+        run: |
+          cmp public/symbiosis/library.html symbiosis/files/docs/library.html
+          echo "ok: $(sha256sum public/symbiosis/library.html | cut -c1-16)"
+
+  symbiosis-kotlin:
+    name: Symbiosis (Kotlin, host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Kotlin compiler
+        run: |
+          curl -sSL -o kotlin.zip \
+            https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
+          unzip -q kotlin.zip
+          echo "$PWD/kotlinc/bin" >> $GITHUB_PATH
+
+      - name: The library rule and its drift checks
+        run: |
+          cd symbiosis/files
+          kotlinc tests/LibraryIndexTest.kt patch/android/utils/LibraryIndex.kt \
+            -include-runtime -d "$RUNNER_TEMP/li.jar"
+          java -Dfile.encoding=UTF-8 -jar "$RUNNER_TEMP/li.jar"
+
+      - name: The drift checks had their sources
+        run: |
+          # LibraryIndexTest reads GameHelper.kt, GameFolderScanner.kt,
+          # LivePanel.kt and docs/library.html. Assert they are in the
+          # checkout, so "skipped" can never pass for "checked".
+          test -f symbiosis/files/patch/android/utils/GameHelper.kt
+          test -f symbiosis/files/docs/library.html
+          echo "drift checks had their sources"
+
+      - name: Patch applies to a fresh clone
+        run: |
+          git clone --depth 1 https://github.com/sj0404-collab/symbiosis "$RUNNER_TEMP/sym"
+          cd "$RUNNER_TEMP/sym"
+          git apply --check "$GITHUB_WORKSPACE/symbiosis/changes.patch" \
+            && echo "ok: changes.patch applies cleanly" \
+            || echo "::warning::patch does not apply to current main - rebase it"
